@@ -86,6 +86,17 @@ class SQLiteStore:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS check_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    target_url TEXT NOT NULL,
+                    snapshot TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS jobs_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_type TEXT NOT NULL,
@@ -100,6 +111,7 @@ class SQLiteStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_inspect_cache_target_created ON inspect_cache(target_url, created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_analyze_cache_target_snapshot_created ON analyze_cache(target_url, snapshot, created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sitemap_cache_target_snapshot_created ON sitemap_cache(target_url, snapshot, created_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_check_cache_target_snapshot_created ON check_cache(target_url, snapshot, created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_history_target_created ON jobs_history(target_url, created_at DESC)")
 
     def _normalize_target_url(self, target_url: str) -> str:
@@ -207,6 +219,13 @@ class SQLiteStore:
     def get_sitemap_cache_with_meta(self, cache_key: str, max_age_seconds: int) -> Optional[Dict[str, Any]]:
         return self._get_cache_row_with_meta("sitemap_cache", cache_key, max_age_seconds)
 
+    def get_check_cache(self, cache_key: str, max_age_seconds: int) -> Optional[Dict[str, Any]]:
+        row = self._get_cache_row_with_meta("check_cache", cache_key, max_age_seconds)
+        return row["payload"] if row else None
+
+    def get_check_cache_with_meta(self, cache_key: str, max_age_seconds: int) -> Optional[Dict[str, Any]]:
+        return self._get_cache_row_with_meta("check_cache", cache_key, max_age_seconds)
+
     def get_latest_inspect_for_url(self, target_url: str, max_age_seconds: int) -> Optional[Dict[str, Any]]:
         target_url = self._normalize_target_url(target_url)
         with self._connect() as conn:
@@ -254,6 +273,70 @@ class SQLiteStore:
                 ).fetchone()
         return self._decode_cache_row(row, max_age_seconds)
 
+    def get_latest_sitemap_for_url(
+        self,
+        target_url: str,
+        max_age_seconds: int,
+        snapshot: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        target_url = self._normalize_target_url(target_url)
+        with self._connect() as conn:
+            if snapshot:
+                row = conn.execute(
+                    """
+                    SELECT cache_key, payload_json, created_at
+                    FROM sitemap_cache
+                    WHERE target_url = ? AND snapshot = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (target_url, snapshot),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT cache_key, payload_json, created_at
+                    FROM sitemap_cache
+                    WHERE target_url = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (target_url,),
+                ).fetchone()
+        return self._decode_cache_row(row, max_age_seconds)
+
+    def get_latest_check_for_url(
+        self,
+        target_url: str,
+        max_age_seconds: int,
+        snapshot: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        target_url = self._normalize_target_url(target_url)
+        with self._connect() as conn:
+            if snapshot:
+                row = conn.execute(
+                    """
+                    SELECT cache_key, payload_json, created_at
+                    FROM check_cache
+                    WHERE target_url = ? AND snapshot = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (target_url, snapshot),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT cache_key, payload_json, created_at
+                    FROM check_cache
+                    WHERE target_url = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (target_url,),
+                ).fetchone()
+        return self._decode_cache_row(row, max_age_seconds)
+
     def set_sitemap_cache(self, cache_key: str, target_url: str, snapshot: str, payload: Dict[str, Any]) -> None:
         target_url = self._normalize_target_url(target_url)
         now = int(time.time())
@@ -262,6 +345,24 @@ class SQLiteStore:
             conn.execute(
                 """
                 INSERT INTO sitemap_cache(cache_key,target_url,snapshot,payload_json,created_at)
+                VALUES(?,?,?,?,?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    target_url=excluded.target_url,
+                    snapshot=excluded.snapshot,
+                    payload_json=excluded.payload_json,
+                    created_at=excluded.created_at
+                """,
+                (cache_key, target_url, snapshot, data, now),
+            )
+
+    def set_check_cache(self, cache_key: str, target_url: str, snapshot: str, payload: Dict[str, Any]) -> None:
+        target_url = self._normalize_target_url(target_url)
+        now = int(time.time())
+        data = json.dumps(payload)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO check_cache(cache_key,target_url,snapshot,payload_json,created_at)
                 VALUES(?,?,?,?,?)
                 ON CONFLICT(cache_key) DO UPDATE SET
                     target_url=excluded.target_url,
@@ -337,6 +438,7 @@ class SQLiteStore:
             "inspect_cache": 0,
             "analyze_cache": 0,
             "sitemap_cache": 0,
+            "check_cache": 0,
             "jobs_history": 0,
         }
 
@@ -361,6 +463,7 @@ class SQLiteStore:
                 removed["inspect_cache"] = _delete_by_target(conn, "inspect_cache")
                 removed["analyze_cache"] = _delete_by_target(conn, "analyze_cache")
                 removed["sitemap_cache"] = _delete_by_target(conn, "sitemap_cache")
+                removed["check_cache"] = _delete_by_target(conn, "check_cache")
                 removed["jobs_history"] = _delete_by_target(conn, "jobs_history")
         return removed
 
@@ -494,6 +597,18 @@ class SQLiteStore:
                 (target_url,),
             ).fetchall()
 
+            check_rows = conn.execute(
+                """
+                SELECT snapshot, MAX(created_at) AS created_at
+                FROM check_cache
+                WHERE target_url = ? AND COALESCE(snapshot, '') <> ''
+                GROUP BY snapshot
+                ORDER BY created_at DESC
+                LIMIT 60
+                """,
+                (target_url,),
+            ).fetchall()
+
         now = int(time.time())
 
         project: Dict[str, Any] = {
@@ -555,6 +670,7 @@ class SQLiteStore:
 
         analyze_snaps = _rows_to_snapshot_list(analyze_rows)
         sitemap_snaps = _rows_to_snapshot_list(sitemap_rows)
+        check_snaps = _rows_to_snapshot_list(check_rows)
 
         return {
             "target_url": target_url,
@@ -568,6 +684,10 @@ class SQLiteStore:
                 "count": len(sitemap_snaps),
                 "snapshots": sitemap_snaps,
             },
+            "check": {
+                "count": len(check_snaps),
+                "snapshots": check_snaps,
+            },
         }
 
     def prune_old_data(self, cache_retention_seconds: int, jobs_retention_seconds: int) -> Dict[str, int]:
@@ -578,6 +698,7 @@ class SQLiteStore:
             "inspect_cache": 0,
             "analyze_cache": 0,
             "sitemap_cache": 0,
+            "check_cache": 0,
             "jobs_history": 0,
         }
         with self._lock, self._connect() as conn:
@@ -587,6 +708,8 @@ class SQLiteStore:
             removed["analyze_cache"] = max(0, int(cur.rowcount or 0))
             cur = conn.execute("DELETE FROM sitemap_cache WHERE created_at < ?", (cache_cutoff,))
             removed["sitemap_cache"] = max(0, int(cur.rowcount or 0))
+            cur = conn.execute("DELETE FROM check_cache WHERE created_at < ?", (cache_cutoff,))
+            removed["check_cache"] = max(0, int(cur.rowcount or 0))
             cur = conn.execute("DELETE FROM jobs_history WHERE created_at < ?", (jobs_cutoff,))
             removed["jobs_history"] = max(0, int(cur.rowcount or 0))
         return removed

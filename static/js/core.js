@@ -225,7 +225,8 @@
     const inspectList = document.getElementById("project-inspect-list");
     const analyzeList = document.getElementById("project-analyze-list");
     const sitemapList = document.getElementById("project-sitemap-list");
-    if (!card || !summary || !inspectList || !analyzeList || !sitemapList) return;
+    const checkList = document.getElementById("project-check-list");
+    if (!card || !summary || !inspectList || !analyzeList || !sitemapList || !checkList) return;
 
     const target = (url || "").trim();
     if (!target) {
@@ -242,6 +243,7 @@
       const inspect = s.inspect || {};
       const analyze = s.analyze || { count: 0, snapshots: [] };
       const sitemap = s.sitemap || { count: 0, snapshots: [] };
+      const check = s.check || { count: 0, snapshots: [] };
 
       card.style.display = "block";
       summary.textContent = `Snapshot searched first: ${inspect.first_found_snapshot || "-"} | latest found: ${inspect.latest_found_snapshot || "-"} | project last snapshot: ${project.last_snapshot || "-"} | cache-first mode active`;
@@ -262,6 +264,7 @@
 
       renderProjectSnapshotChips(analyzeList, analyze.snapshots || []);
       renderProjectSnapshotChips(sitemapList, sitemap.snapshots || []);
+      renderProjectSnapshotChips(checkList, check.snapshots || []);
     } catch (e) {
       addLog("Project data status error: " + e.message, "error");
     }

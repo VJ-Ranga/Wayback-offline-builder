@@ -532,6 +532,40 @@ def _best_analyze_for_render(target_url: str, selected_snapshot: str = "", cdx_l
     return None
 
 
+def _best_sitemap_for_render(target_url: str, selected_snapshot: str = "") -> Optional[dict]:
+    target_url = _normalize_target_url(target_url)
+    if not target_url:
+        return None
+
+    if selected_snapshot:
+        key = f"s|{target_url}|{selected_snapshot}"
+        row = store.get_sitemap_cache_with_meta(key, PERSISTENT_CACHE_MAX_AGE_SECONDS)
+        if row is not None:
+            return _with_cache_meta(row.get("payload", {}), "sqlite", int(row.get("age_seconds", 0)))
+
+    latest = store.get_latest_sitemap_for_url(target_url, PERSISTENT_CACHE_MAX_AGE_SECONDS, snapshot=selected_snapshot or None)
+    if latest is not None:
+        return _with_cache_meta(latest.get("payload", {}), "sqlite", int(latest.get("age_seconds", 0)))
+    return None
+
+
+def _best_check_for_render(target_url: str, selected_snapshot: str = "") -> Optional[dict]:
+    target_url = _normalize_target_url(target_url)
+    if not target_url:
+        return None
+
+    if selected_snapshot:
+        key = f"c|{target_url}|{selected_snapshot}"
+        row = store.get_check_cache_with_meta(key, PERSISTENT_CACHE_MAX_AGE_SECONDS)
+        if row is not None:
+            return _with_cache_meta(row.get("payload", {}), "sqlite", int(row.get("age_seconds", 0)))
+
+    latest = store.get_latest_check_for_url(target_url, PERSISTENT_CACHE_MAX_AGE_SECONDS, snapshot=selected_snapshot or None)
+    if latest is not None:
+        return _with_cache_meta(latest.get("payload", {}), "sqlite", int(latest.get("age_seconds", 0)))
+    return None
+
+
 def _list_output_choices(current: str = "") -> list[str]:
     choices: set[str] = {str(OUTPUT_ROOT_DIR)}
     if current:
@@ -664,6 +698,14 @@ def open_project_cached():
     elif inspect:
         selected_snapshot = inspect.get("latest_ok_snapshot") or inspect.get("latest_snapshot")
 
+    sitemap = _best_sitemap_for_render(target_url, selected_snapshot=selected_snapshot or "")
+    check = _best_check_for_render(target_url, selected_snapshot=selected_snapshot or "")
+
+    if selected_snapshot and check is None:
+        check = _best_check_for_render(target_url)
+    if selected_snapshot and sitemap is None:
+        sitemap = _best_sitemap_for_render(target_url)
+
     if inspect is None and analysis is None:
         return render_template(
             "index.html",
@@ -671,6 +713,7 @@ def open_project_cached():
             inspect=None,
             analysis=None,
             check=None,
+            sitemap=None,
             selected_snapshot=None,
             target_url=target_url,
             output_root=output_root,
@@ -682,7 +725,8 @@ def open_project_cached():
         result=None,
         inspect=inspect,
         analysis=analysis,
-        check=None,
+        check=check,
+        sitemap=sitemap,
         selected_snapshot=selected_snapshot,
         target_url=target_url,
         output_root=output_root,
@@ -1296,6 +1340,9 @@ def check_target():
         inspect = _cached_inspect(target_url, 10, 1500)
         analysis = _cached_analyze(target_url, selected_snapshot)
         check = tool.audit(target_url, str(output_root), selected_snapshot)
+        check_key = f"c|{target_url}|{check.get('snapshot', selected_snapshot)}"
+        store.set_check_cache(check_key, target_url, check.get("snapshot", selected_snapshot), check)
+        store.upsert_project(target_url, output_root=str(output_root), snapshot=check.get("snapshot"))
     except Exception as exc:
         return render_template(
             "index.html",
@@ -1430,6 +1477,9 @@ def download_missing_target():
         inspect = _cached_inspect(target_url, 10, 1500)
         analysis = _cached_analyze(target_url, selected_snapshot)
         check = tool.audit(target_url, str(output_root), selected_snapshot)
+        check_key = f"c|{target_url}|{check.get('snapshot', selected_snapshot)}"
+        store.set_check_cache(check_key, target_url, check.get("snapshot", selected_snapshot), check)
+        store.upsert_project(target_url, output_root=str(output_root), snapshot=check.get("snapshot"))
         message = (
             f"Missing download done: added {repair['added']} files "
             f"({repair['bytes_added_human']}), failed {repair['failed']} in {repair['seconds']}s"
@@ -2148,6 +2198,8 @@ def _start_check_job(target_url: str, selected_snapshot: str, output_root_input:
                 wait_if_paused=_wait_if_paused,
                 should_abort=_should_abort,
             )
+            check_key = f"c|{target_url}|{check.get('snapshot', selected_snapshot)}"
+            store.set_check_cache(check_key, target_url, check.get("snapshot", selected_snapshot), check)
             store.upsert_project(target_url, output_root=str(output_root), snapshot=check.get("snapshot"))
             store.add_job_history("check", target_url, "done", snapshot=check.get("snapshot"), summary={"coverage": check.get("coverage_percent")})
             with CHECK_JOBS_LOCK:
