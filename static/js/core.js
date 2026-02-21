@@ -113,6 +113,58 @@
     return data;
   }
 
+  function confirmProjectDelete(url) {
+    const modal = document.getElementById("confirm-modal");
+    const titleEl = document.getElementById("confirm-title");
+    const textEl = document.getElementById("confirm-text");
+    const checkWrap = document.getElementById("confirm-check-wrap");
+    const checkEl = document.getElementById("confirm-check");
+    const checkLabel = document.getElementById("confirm-check-label");
+    const okBtn = document.getElementById("confirm-ok-btn");
+    const cancelBtn = document.getElementById("confirm-cancel-btn");
+
+    if (!modal || !titleEl || !textEl || !okBtn || !cancelBtn || !checkWrap || !checkEl || !checkLabel) {
+      const ok = window.confirm(`Delete recent project and related local cache?\n\n${url}`);
+      if (!ok) return Promise.resolve({ confirmed: false, deleteOutputFiles: false });
+      const deleteOutputFiles = window.confirm("Also delete local output folder files for this project?");
+      return Promise.resolve({ confirmed: true, deleteOutputFiles });
+    }
+
+    titleEl.textContent = "Delete Project";
+    textEl.textContent = `Delete project data for:\n${url}`;
+    checkWrap.style.display = "inline-flex";
+    checkEl.checked = false;
+    checkLabel.textContent = "Also delete local output folder files";
+
+    return new Promise(function (resolve) {
+      function cleanup() {
+        modal.classList.remove("show");
+        modal.setAttribute("aria-hidden", "true");
+        okBtn.removeEventListener("click", onOk);
+        cancelBtn.removeEventListener("click", onCancel);
+        modal.removeEventListener("click", onBackdrop);
+      }
+      function onOk() {
+        const deleteOutputFiles = !!checkEl.checked;
+        cleanup();
+        resolve({ confirmed: true, deleteOutputFiles });
+      }
+      function onCancel() {
+        cleanup();
+        resolve({ confirmed: false, deleteOutputFiles: false });
+      }
+      function onBackdrop(ev) {
+        if (ev.target === modal) onCancel();
+      }
+
+      okBtn.addEventListener("click", onOk);
+      cancelBtn.addEventListener("click", onCancel);
+      modal.addEventListener("click", onBackdrop);
+      modal.classList.add("show");
+      modal.setAttribute("aria-hidden", "false");
+    });
+  }
+
   function formatElapsedSeconds(sec) {
     const safe = Math.max(0, Number(sec || 0));
     const m = Math.floor(safe / 60);
@@ -309,11 +361,9 @@
       ev.stopPropagation();
       const url = btn.getAttribute("data-delete-project-url") || "";
       if (!url) return;
-      const ok = window.confirm(`Delete recent project and related local cache?\n\n${url}`);
-      if (!ok) return;
-      const deleteOutputFiles = window.confirm(
-        "Also delete local output folder files for this project?\n\nOK = delete files too\nCancel = keep files"
-      );
+      const confirm = await confirmProjectDelete(url);
+      if (!confirm.confirmed) return;
+      const deleteOutputFiles = !!confirm.deleteOutputFiles;
 
       try {
         const res = await fetch("/recent-projects/delete", {
