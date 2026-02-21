@@ -1,4 +1,4 @@
-# Archive Web Offline Tool
+# Wayback Offline Builder
 
 A local-first Flask app to inspect Wayback snapshots, analyze site structure, generate sitemap/check reports, and build a recoverable offline copy.
 
@@ -64,13 +64,3 @@ Deleting a project from UI removes DB/cache/history for that domain, but does no
 - `MAX_ACTIVE_JOBS` (default `4`)
 - `JOB_RETENTION_SECONDS` (default `3600`)
 - `JOB_CLEANUP_INTERVAL_SECONDS` (default `60`)
-
-## Suggested Project Names
-
-If you want to rename before pushing, good options:
-
-1. `WaybackWorkbench` (recommended)
-2. `SnapshotForge`
-3. `ArchivePilot`
-4. `OfflineFromArchive`
-5. `WaybackOps`
