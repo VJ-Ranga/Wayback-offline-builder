@@ -60,6 +60,13 @@ class AppSmokeTest(unittest.TestCase):
         self.assertTrue(payload.get("ok"))
         self.assertIn("status", payload)
 
+    def test_diagnostics_endpoint_returns_ok_payload(self) -> None:
+        response = self.client.get("/diagnostics")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json() or {}
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("runtime", payload)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

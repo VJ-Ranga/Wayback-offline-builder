@@ -23,6 +23,9 @@ BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 DB_PATH = BASE_DIR / "archive_cache.sqlite3"
+OUTPUT_ROOT_DIR = Path(os.environ.get("OUTPUT_ROOT_DIR", str(OUTPUT_DIR))).expanduser().resolve()
+OUTPUT_ROOT_DIR.mkdir(parents=True, exist_ok=True)
+ALLOW_UNSAFE_OUTPUT_ROOT = os.environ.get("ALLOW_UNSAFE_OUTPUT_ROOT", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("APP_SECRET_KEY") or secrets.token_hex(32)
@@ -58,6 +61,10 @@ ACTIVE_JOBS_COUNT = 0
 JOB_RETENTION_SECONDS = int(os.environ.get("JOB_RETENTION_SECONDS", "3600"))
 JOB_CLEANUP_INTERVAL_SECONDS = int(os.environ.get("JOB_CLEANUP_INTERVAL_SECONDS", "60"))
 _LAST_JOB_CLEANUP_TS = 0.0
+DB_PRUNE_INTERVAL_SECONDS = int(os.environ.get("DB_PRUNE_INTERVAL_SECONDS", "600"))
+DB_CACHE_RETENTION_SECONDS = int(os.environ.get("DB_CACHE_RETENTION_SECONDS", str(14 * 24 * 3600)))
+DB_JOBS_RETENTION_SECONDS = int(os.environ.get("DB_JOBS_RETENTION_SECONDS", str(30 * 24 * 3600)))
+_LAST_DB_PRUNE_TS = 0.0
 
 
 class JobCapacityError(RuntimeError):
@@ -186,9 +193,22 @@ def _maybe_cleanup_jobs() -> None:
     _LAST_JOB_CLEANUP_TS = now
 
 
+def _maybe_prune_db() -> None:
+    global _LAST_DB_PRUNE_TS
+    now = time.time()
+    if (now - _LAST_DB_PRUNE_TS) < max(30, DB_PRUNE_INTERVAL_SECONDS):
+        return
+    try:
+        store.prune_old_data(DB_CACHE_RETENTION_SECONDS, DB_JOBS_RETENTION_SECONDS)
+    except Exception:
+        pass
+    _LAST_DB_PRUNE_TS = now
+
+
 @app.before_request
 def apply_security_guards():
     _maybe_cleanup_jobs()
+    _maybe_prune_db()
     if app.config.get("TESTING"):
         return None
     _get_csrf_token()
@@ -426,12 +446,15 @@ def _best_analyze_for_render(target_url: str, selected_snapshot: str = "", cdx_l
 
 
 def _list_output_choices(current: str = "") -> list[str]:
-    choices: set[str] = {str(OUTPUT_DIR)}
+    choices: set[str] = {str(OUTPUT_ROOT_DIR)}
     if current:
-        choices.add(str(_resolve_output_root(current)))
+        try:
+            choices.add(str(_resolve_output_root(current)))
+        except Exception:
+            choices.add(str(OUTPUT_ROOT_DIR))
 
     try:
-        for manifest in OUTPUT_DIR.glob("**/manifest.json"):
+        for manifest in OUTPUT_ROOT_DIR.glob("**/manifest.json"):
             choices.add(str(manifest.parent))
             choices.add(str(manifest.parent.parent))
     except Exception:
@@ -464,7 +487,7 @@ def index():
         check=None,
         selected_snapshot=None,
         target_url="",
-        output_root=str(OUTPUT_DIR),
+        output_root=str(OUTPUT_ROOT_DIR),
         error=None,
     )
 
@@ -489,6 +512,63 @@ def project_data_status():
         return jsonify({"ok": False, "error": "target_url is required"}), 400
     status = store.get_project_data_status(target_url)
     return jsonify({"ok": True, "status": status})
+
+
+def _dir_size_bytes(path: Path) -> int:
+    total = 0
+    try:
+        for root, _dirs, files in os.walk(path):
+            for name in files:
+                fp = Path(root) / name
+                try:
+                    total += int(fp.stat().st_size)
+                except Exception:
+                    pass
+    except Exception:
+        return 0
+    return total
+
+
+def _jobs_state_counts(job_map: dict[str, dict], lock: threading.Lock) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    with lock:
+        for job in job_map.values():
+            state = str(job.get("state") or "unknown")
+            counts[state] = counts.get(state, 0) + 1
+    return counts
+
+
+@app.get("/diagnostics")
+def diagnostics():
+    payload = {
+        "ok": True,
+        "config": {
+            "host": os.environ.get("HOST", "127.0.0.1"),
+            "port": int(os.environ.get("PORT", "5000")),
+            "max_active_jobs": MAX_ACTIVE_JOBS,
+            "allow_unsafe_output_root": ALLOW_UNSAFE_OUTPUT_ROOT,
+            "output_root_dir": str(OUTPUT_ROOT_DIR),
+            "require_local_mutations": REQUIRE_LOCAL_MUTATIONS,
+        },
+        "runtime": {
+            "active_jobs": ACTIVE_JOBS_COUNT,
+            "jobs": {
+                "download": _jobs_state_counts(JOBS, JOBS_LOCK),
+                "missing": _jobs_state_counts(MISSING_JOBS, MISSING_JOBS_LOCK),
+                "inspect": _jobs_state_counts(INSPECT_JOBS, INSPECT_JOBS_LOCK),
+                "analyze": _jobs_state_counts(ANALYZE_JOBS, ANALYZE_JOBS_LOCK),
+                "analyze_batch": _jobs_state_counts(ANALYZE_BATCH_JOBS, ANALYZE_BATCH_JOBS_LOCK),
+                "check": _jobs_state_counts(CHECK_JOBS, CHECK_JOBS_LOCK),
+                "sitemap": _jobs_state_counts(SITEMAP_JOBS, SITEMAP_JOBS_LOCK),
+            },
+        },
+        "storage": {
+            "db_path": str(DB_PATH),
+            "db_size_bytes": int(DB_PATH.stat().st_size) if DB_PATH.exists() else 0,
+            "output_size_bytes": _dir_size_bytes(OUTPUT_ROOT_DIR),
+        },
+    }
+    return jsonify(payload)
 
 
 def _parse_max_files(value: Optional[str]) -> int:
@@ -524,13 +604,24 @@ def _parse_int(value: Optional[str], default: int, min_value: int, max_value: in
     return max(min_value, min(num, max_value))
 
 
+def _is_within(parent: Path, child: Path) -> bool:
+    try:
+        child.resolve().relative_to(parent.resolve())
+        return True
+    except Exception:
+        return False
+
+
 def _resolve_output_root(value: Optional[str]) -> Path:
     raw = (value or "").strip()
     if not raw:
-        path = OUTPUT_DIR
+        path = OUTPUT_ROOT_DIR
     else:
         candidate = Path(raw).expanduser()
         path = candidate if candidate.is_absolute() else (BASE_DIR / candidate)
+    path = path.resolve()
+    if not ALLOW_UNSAFE_OUTPUT_ROOT and not _is_within(OUTPUT_ROOT_DIR, path):
+        raise ValueError(f"Output path must be inside {OUTPUT_ROOT_DIR}")
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -568,7 +659,7 @@ def _build_sitemap_from_analysis(analysis: dict) -> dict:
 @app.post("/inspect")
 def inspect_target():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
-    output_root = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
     display_limit = _parse_int(request.form.get("display_limit"), default=10, min_value=5, max_value=2000)
     cdx_limit = _parse_int(request.form.get("cdx_limit"), default=1500, min_value=500, max_value=100000)
     try:
@@ -607,7 +698,7 @@ def inspect_target():
 @app.post("/inspect/start")
 def inspect_start():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
-    output_root_input = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root_input = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
     display_limit = _parse_int(request.form.get("display_limit"), default=10, min_value=5, max_value=2000)
     cdx_limit = _parse_int(request.form.get("cdx_limit"), default=1500, min_value=500, max_value=100000)
     force_refresh = _parse_bool(request.form.get("force_refresh"), default=False)
@@ -711,7 +802,7 @@ def inspect_stop(job_id: str):
 def analyze_start():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
-    output_root = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
     display_limit = _parse_int(request.form.get("display_limit"), default=10, min_value=5, max_value=2000)
     cdx_limit = _parse_int(request.form.get("cdx_limit"), default=ANALYZE_DEEP_CDX_LIMIT, min_value=500, max_value=100000)
     if not target_url:
@@ -786,7 +877,7 @@ def analyze_result(job_id: str):
             check=None,
             selected_snapshot=None,
             target_url=job.get("target_url", "") if job else "",
-            output_root=job.get("output_root", str(OUTPUT_DIR)) if job else str(OUTPUT_DIR),
+            output_root=job.get("output_root", str(OUTPUT_ROOT_DIR)) if job else str(OUTPUT_ROOT_DIR),
             error=(job.get("error") if job else "Analyze job not found") or "Analyze job not completed",
         )
     analysis = job["result"]
@@ -801,7 +892,7 @@ def analyze_result(job_id: str):
         check=None,
         selected_snapshot=analysis.get("selected_snapshot"),
         target_url=job.get("target_url", ""),
-        output_root=job.get("output_root", str(OUTPUT_DIR)),
+        output_root=job.get("output_root", str(OUTPUT_ROOT_DIR)),
         error=None,
     )
 
@@ -809,7 +900,7 @@ def analyze_result(job_id: str):
 @app.post("/analyze-batch/start")
 def analyze_batch_start():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
-    output_root = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
     display_limit = _parse_int(request.form.get("display_limit"), default=20, min_value=5, max_value=500)
     inspect_cdx_limit = _parse_int(request.form.get("inspect_cdx_limit"), default=1500, min_value=500, max_value=100000)
     analyze_cdx_limit = _parse_int(request.form.get("analyze_cdx_limit"), default=ANALYZE_DEEP_CDX_LIMIT, min_value=500, max_value=100000)
@@ -884,7 +975,7 @@ def analyze_batch_stop(job_id: str):
 def check_start():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
-    output_root = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
     if not target_url:
         return jsonify({"ok": False, "error": "URL is required"}), 400
     try:
@@ -957,7 +1048,7 @@ def check_result(job_id: str):
             check=None,
             selected_snapshot=None,
             target_url=job.get("target_url", "") if job else "",
-            output_root=job.get("output_root", str(OUTPUT_DIR)) if job else str(OUTPUT_DIR),
+            output_root=job.get("output_root", str(OUTPUT_ROOT_DIR)) if job else str(OUTPUT_ROOT_DIR),
             error=(job.get("error") if job else "Check job not found") or "Check job not completed",
         )
     check = job["result"]
@@ -971,7 +1062,7 @@ def check_result(job_id: str):
         check=check,
         selected_snapshot=job.get("selected_snapshot", ""),
         target_url=job.get("target_url", ""),
-        output_root=job.get("output_root", str(OUTPUT_DIR)),
+        output_root=job.get("output_root", str(OUTPUT_ROOT_DIR)),
         error=None,
     )
 
@@ -980,7 +1071,7 @@ def check_result(job_id: str):
 def sitemap_start():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
-    output_root = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
     cdx_limit = _parse_int(request.form.get("cdx_limit"), default=1500, min_value=500, max_value=100000)
     if not target_url:
         return jsonify({"ok": False, "error": "URL is required"}), 400
@@ -1054,7 +1145,7 @@ def sitemap_result(job_id: str):
             check=None,
             selected_snapshot=None,
             target_url=job.get("target_url", "") if job else "",
-            output_root=job.get("output_root", str(OUTPUT_DIR)) if job else str(OUTPUT_DIR),
+            output_root=job.get("output_root", str(OUTPUT_ROOT_DIR)) if job else str(OUTPUT_ROOT_DIR),
             error=(job.get("error") if job else "Sitemap job not found") or "Sitemap job not completed",
         )
     analysis = job["result"].get("analysis")
@@ -1071,7 +1162,7 @@ def sitemap_result(job_id: str):
         sitemap=sitemap,
         selected_snapshot=job.get("selected_snapshot", ""),
         target_url=job.get("target_url", ""),
-        output_root=job.get("output_root", str(OUTPUT_DIR)),
+        output_root=job.get("output_root", str(OUTPUT_ROOT_DIR)),
         error=None,
     )
 
@@ -1089,7 +1180,7 @@ def inspect_result(job_id: str):
             check=None,
             selected_snapshot=None,
             target_url="",
-            output_root=str(OUTPUT_DIR),
+            output_root=str(OUTPUT_ROOT_DIR),
             error="Inspect job not found",
         )
 
@@ -1102,7 +1193,7 @@ def inspect_result(job_id: str):
             check=None,
             selected_snapshot=None,
             target_url=job.get("target_url", ""),
-            output_root=job.get("output_root", str(OUTPUT_DIR)),
+            output_root=job.get("output_root", str(OUTPUT_ROOT_DIR)),
             display_limit=job.get("display_limit", 120),
             cdx_limit=job.get("cdx_limit", 20000),
             error=job.get("error") or "Inspect job not completed yet",
@@ -1118,7 +1209,7 @@ def inspect_result(job_id: str):
         check=None,
         selected_snapshot=selected_snapshot,
         target_url=job.get("target_url", ""),
-        output_root=job.get("output_root", str(OUTPUT_DIR)),
+        output_root=job.get("output_root", str(OUTPUT_ROOT_DIR)),
         display_limit=job.get("display_limit", 120),
         cdx_limit=job.get("cdx_limit", 20000),
         error=None,
@@ -1129,7 +1220,7 @@ def inspect_result(job_id: str):
 def analyze_target():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
-    output_root = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
     display_limit = _parse_int(request.form.get("display_limit"), default=10, min_value=5, max_value=2000)
     cdx_limit = _parse_int(request.form.get("cdx_limit"), default=ANALYZE_DEEP_CDX_LIMIT, min_value=500, max_value=100000)
 
@@ -1172,7 +1263,7 @@ def analyze_target():
 def check_target():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
-    output_root_input = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root_input = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
 
     try:
         output_root = _resolve_output_root(output_root_input)
@@ -1209,7 +1300,7 @@ def check_target():
 def sitemap_target():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
-    output_root_input = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root_input = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
 
     try:
         output_root = _resolve_output_root(output_root_input)
@@ -1299,7 +1390,7 @@ def sitemap_export_csv():
 def download_missing_target():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
-    output_root_input = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root_input = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
     missing_limit = _parse_missing_limit(request.form.get("missing_limit"))
 
     try:
@@ -2107,7 +2198,7 @@ def download_start():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
     max_files = _parse_max_files(request.form.get("max_files"))
-    output_root_input = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root_input = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
 
     if not target_url:
         return jsonify({"ok": False, "error": "URL is required"}), 400
@@ -2146,7 +2237,7 @@ def download_stop(job_id: str):
 def download_missing_start():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
-    output_root_input = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root_input = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
     missing_limit = _parse_missing_limit(request.form.get("missing_limit"))
     skip_errors = _parse_bool(request.form.get("skip_errors"), default=True)
 
@@ -2245,7 +2336,7 @@ def download_target():
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
     max_files = _parse_max_files(request.form.get("max_files"))
-    output_root_input = request.form.get("output_root", str(OUTPUT_DIR)).strip()
+    output_root_input = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
 
     try:
         output_root = _resolve_output_root(output_root_input)

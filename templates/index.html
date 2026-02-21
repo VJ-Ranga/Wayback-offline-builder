@@ -916,6 +916,9 @@
         <div class="status-pill ready" id="status-indicator">
           Ready
         </div>
+        <div style="margin-top:10px;">
+          <a href="/diagnostics" target="_blank" style="font-size:12px;color:var(--muted);">Open diagnostics</a>
+        </div>
       </div>
     </aside>
 
@@ -1258,6 +1261,11 @@
             <div class="stat-value">{{ analysis.site_type }}</div>
             <div class="stat-label">Detected Type</div>
           </div>
+        </div>
+
+        <div class="alert alert-success" style="margin-top:10px;">
+          <span>✅</span>
+          <span><strong>Next steps:</strong> 1) Build sitemap, 2) Check have vs missing, 3) Download offline copy</span>
         </div>
 
         <div class="action-bar" id="download-results">

@@ -539,6 +539,27 @@ class SQLiteStore:
             },
         }
 
+    def prune_old_data(self, cache_retention_seconds: int, jobs_retention_seconds: int) -> Dict[str, int]:
+        now = int(time.time())
+        cache_cutoff = now - max(60, int(cache_retention_seconds))
+        jobs_cutoff = now - max(60, int(jobs_retention_seconds))
+        removed = {
+            "inspect_cache": 0,
+            "analyze_cache": 0,
+            "sitemap_cache": 0,
+            "jobs_history": 0,
+        }
+        with self._lock, self._connect() as conn:
+            cur = conn.execute("DELETE FROM inspect_cache WHERE created_at < ?", (cache_cutoff,))
+            removed["inspect_cache"] = max(0, int(cur.rowcount or 0))
+            cur = conn.execute("DELETE FROM analyze_cache WHERE created_at < ?", (cache_cutoff,))
+            removed["analyze_cache"] = max(0, int(cur.rowcount or 0))
+            cur = conn.execute("DELETE FROM sitemap_cache WHERE created_at < ?", (cache_cutoff,))
+            removed["sitemap_cache"] = max(0, int(cur.rowcount or 0))
+            cur = conn.execute("DELETE FROM jobs_history WHERE created_at < ?", (jobs_cutoff,))
+            removed["jobs_history"] = max(0, int(cur.rowcount or 0))
+        return removed
+
     def _get_cache_row_with_meta(self, table: str, cache_key: str, max_age_seconds: int) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
             row = conn.execute(

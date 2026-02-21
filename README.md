@@ -64,3 +64,8 @@ Deleting a project from UI removes DB/cache/history for that domain, but does no
 - `MAX_ACTIVE_JOBS` (default `4`)
 - `JOB_RETENTION_SECONDS` (default `3600`)
 - `JOB_CLEANUP_INTERVAL_SECONDS` (default `60`)
+- `OUTPUT_ROOT_DIR` (default `./output`)
+- `ALLOW_UNSAFE_OUTPUT_ROOT` (default `0`, restricts output to `OUTPUT_ROOT_DIR`)
+- `DB_PRUNE_INTERVAL_SECONDS` (default `600`)
+- `DB_CACHE_RETENTION_SECONDS` (default `1209600` / 14 days)
+- `DB_JOBS_RETENTION_SECONDS` (default `2592000` / 30 days)
