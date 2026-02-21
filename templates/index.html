@@ -1,0 +1,2749 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Archive Web Offline Tool</title>
+  <style>
+    :root {
+      --bg: #f8f5f0;
+      --panel: #fffdf9;
+      --card: #fffdf9;
+      --text: #1a1512;
+      --muted: #6b5e51;
+      --accent: #8b5a3a;
+      --accent-2: #6b4423;
+      --success: #4a7c59;
+      --warning: #c9a227;
+      --error: #b54242;
+      --border: #e0d5c8;
+      --shadow: 0 4px 20px rgba(0,0,0,0.08);
+      --radius: 14px;
+      --radius-sm: 8px;
+    }
+
+    * { box-sizing: border-box; }
+    
+    body {
+      margin: 0;
+      font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      min-height: 100vh;
+    }
+
+    /* Layout */
+    .app {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      min-height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: grid;
+      place-items: center;
+      color: white;
+      font-size: 18px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .brand p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* Navigation */
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: left;
+    }
+
+    .nav-btn:hover {
+      background: rgba(139, 90, 58, 0.08);
+      color: var(--text);
+    }
+
+    .nav-btn.active {
+      background: rgba(139, 90, 58, 0.12);
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .nav-btn .step {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--border);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      display: grid;
+      place-items: center;
+    }
+
+    .nav-btn.active .step {
+      background: var(--accent);
+      color: white;
+    }
+
+    .nav-btn.completed .step {
+      background: var(--success);
+      color: white;
+    }
+
+    .recent-box {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px;
+      background: white;
+    }
+
+    .recent-box h4 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+
+    .recent-list {
+      display: grid;
+      gap: 6px;
+      max-height: 170px;
+      overflow: auto;
+    }
+
+    .recent-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px;
+      align-items: stretch;
+    }
+
+    .recent-item {
+      border: 1px solid var(--border);
+      background: #fff;
+      border-radius: 6px;
+      padding: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .recent-item small {
+      display: block;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .recent-delete {
+      border: 1px solid #e6b7b7;
+      background: #fff5f5;
+      color: #b24545;
+      border-radius: 6px;
+      padding: 0 10px;
+      font-size: 12px;
+      cursor: pointer;
+      min-width: 36px;
+    }
+
+    .recent-delete:hover {
+      background: #ffe9e9;
+    }
+
+    /* Main Content */
+    .main {
+      padding: 24px 28px;
+      max-width: 1400px;
+    }
+
+    /* Workflow Header */
+    .workflow-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .workflow-title h2 {
+      margin: 0 0 4px;
+      font-size: 22px;
+    }
+
+    .workflow-title p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .quick-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .card-title {
+      margin: 0 0 16px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    /* Forms */
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 500;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      background: white;
+      transition: border-color 0.15s;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .form-group input[type="checkbox"] {
+      width: auto;
+      padding: 0;
+      margin: 0;
+      accent-color: var(--accent);
+    }
+
+    .inline-check {
+      display: inline-flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 10px;
+      cursor: pointer;
+    }
+
+    .inline-check span {
+      line-height: 1.3;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-2);
+    }
+
+    .btn-secondary {
+      background: var(--border);
+      color: var(--text);
+    }
+
+    .btn-secondary:hover {
+      background: #d0c5b8;
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #3a6648;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Advanced Options Toggle */
+    .advanced-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 0;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 13px;
+      border-top: 1px dashed var(--border);
+      margin-top: 16px;
+    }
+
+    .advanced-toggle:hover {
+      color: var(--accent);
+    }
+
+    .advanced-content {
+      display: none;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      margin-top: 16px;
+    }
+
+    .advanced-content.open {
+      display: block;
+    }
+
+    /* Status Indicators */
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .status-pill::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .status-pill.ready {
+      background: rgba(139, 90, 58, 0.1);
+      color: var(--accent);
+    }
+
+    .status-pill.ready::before {
+      background: var(--accent);
+    }
+
+    .status-pill.running {
+      background: rgba(201, 162, 39, 0.1);
+      color: var(--warning);
+    }
+
+    .status-pill.running::before {
+      background: var(--warning);
+      animation: pulse 1.5s infinite;
+    }
+
+    .status-pill.success {
+      background: rgba(74, 124, 89, 0.1);
+      color: var(--success);
+    }
+
+    .status-pill.success::before {
+      background: var(--success);
+    }
+
+    .status-pill.error {
+      background: rgba(181, 66, 66, 0.1);
+      color: var(--error);
+    }
+
+    .status-pill.error::before {
+      background: var(--error);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Progress Bar */
+    .progress-container {
+      margin: 16px 0;
+    }
+
+    .progress-info {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .progress-bar {
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      border-radius: 4px;
+      transition: width 0.3s;
+    }
+
+    /* Live Log Panel */
+    .log-panel {
+      width: 100%;
+      margin-top: 22px;
+      max-height: none;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .log-header h4 {
+      margin: 0;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .log-badge {
+      background: var(--accent);
+      color: white;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 10px;
+    }
+
+    .log-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .log-actions button {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+    }
+
+    .log-actions button:hover {
+      background: var(--border);
+    }
+
+    .log-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      max-height: 260px;
+    }
+
+    .log-entry {
+      margin-bottom: 6px;
+      color: var(--muted);
+    }
+
+    .log-entry.error {
+      color: var(--error);
+    }
+
+    .log-entry.success {
+      color: var(--success);
+    }
+
+    .log-entry.warning {
+      color: var(--warning);
+    }
+
+    /* Timeline */
+    .timeline {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 12px 4px;
+      margin: 0 -4px;
+    }
+
+    .timeline-item {
+      flex-shrink: 0;
+      padding: 8px 14px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .timeline-item:hover {
+      border-color: var(--accent);
+      background: rgba(139, 90, 58, 0.05);
+    }
+
+    .timeline-item.active {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    /* Preview iframe */
+    .preview-container {
+      margin-top: 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: white;
+    }
+
+    .preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: #f5f2ed;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .preview-frame {
+      width: 100%;
+      height: 400px;
+      border: none;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin: 16px 0;
+    }
+
+    .stat-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* Action Buttons */
+    .action-bar {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 12px;
+    }
+
+    .list-box {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: white;
+      padding: 10px;
+    }
+
+    .list-box h5 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .3px;
+    }
+
+    .list-box ul {
+      margin: 0;
+      padding-left: 18px;
+      max-height: 180px;
+      overflow: auto;
+      font-size: 13px;
+    }
+
+    .mono-list {
+      font-family: Consolas, Monaco, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    /* Error/Success Messages */
+    .alert {
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .alert-error {
+      background: rgba(181, 66, 66, 0.1);
+      border: 1px solid rgba(181, 66, 66, 0.2);
+      color: var(--error);
+    }
+
+    .alert-success {
+      background: rgba(74, 124, 89, 0.1);
+      border: 1px solid rgba(74, 124, 89, 0.2);
+      color: var(--success);
+    }
+
+    .cache-note {
+      margin: 10px 0 4px;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .cache-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 10px;
+      background: #fff;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+    }
+
+    .status-line {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .snap-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      margin: 0 6px 6px 0;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .snap-chip:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .step-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(248, 245, 240, 0.86);
+      backdrop-filter: blur(2px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 120;
+    }
+
+    .step-overlay.show {
+      display: flex;
+    }
+
+    .step-overlay-card {
+      width: min(560px, calc(100vw - 32px));
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+
+    .step-overlay-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .spin {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .step-list {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .step-list li.active {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* Hidden sections */
+    .section-hidden {
+      display: none;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+      
+      .sidebar {
+        position: relative;
+        height: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+      
+      .nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+      }
+      
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .log-panel { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <datalist id="output-root-options">
+    {% for p in output_choices %}
+    <option value="{{ p }}">
+    {% endfor %}
+  </datalist>
+
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">📦</div>
+        <div>
+          <h1>Archive Tool</h1>
+          <p>Wayback offline builder</p>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button type="button" class="nav-btn active" data-step="1" data-go-tab="inspect">
+          <span class="step">1</span>
+          <span>Inspect</span>
+        </button>
+        <button type="button" class="nav-btn" data-step="2" data-go-tab="analyze">
+          <span class="step">2</span>
+          <span>Analyze</span>
+        </button>
+        <button type="button" class="nav-btn" data-step="3" data-go-tab="sitemap">
+          <span class="step">3</span>
+          <span>Sitemap</span>
+        </button>
+        <button type="button" class="nav-btn" data-step="4" data-go-tab="check">
+          <span class="step">4</span>
+          <span>Check</span>
+        </button>
+        <button type="button" class="nav-btn" data-step="5" data-go-tab="download">
+          <span class="step">5</span>
+          <span>Download</span>
+        </button>
+      </nav>
+
+      <div class="recent-box">
+        <h4>Recent Projects</h4>
+        <div class="recent-list">
+          {% for p in recent_projects %}
+          <div class="recent-row" data-project-row="{{ p.target_url }}">
+            <button type="button" class="recent-item" data-recent-url="{{ p.target_url }}" data-recent-output="{{ p.last_output_root or output_root }}">
+              {{ p.domain }}
+              <small>{{ p.last_snapshot or '-' }} | {{ p.last_site_type or 'Unknown' }}</small>
+            </button>
+            <button type="button" class="recent-delete" data-delete-project-url="{{ p.target_url }}" title="Remove this project">✕</button>
+          </div>
+          {% endfor %}
+          {% if not recent_projects %}
+          <div class="recent-item" style="cursor:default;opacity:.7;">No saved projects yet</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div style="margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border);">
+        <div class="status-pill ready" id="status-indicator">
+          Ready
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Header -->
+      <div class="workflow-header">
+        <div class="workflow-title">
+          <h2>Step 1: Inspect Archive</h2>
+          <p>Find and explore available snapshots for your website</p>
+        </div>
+        <div class="quick-actions">
+          <button type="button" class="btn btn-success" id="quick-download-btn" style="display:none;">
+            ⚡ Quick Download
+          </button>
+        </div>
+      </div>
+
+      <!-- Input Card -->
+      <div class="card">
+        <h3 class="card-title">Website URL</h3>
+        
+        <form id="inspect-form" method="post" action="/inspect">
+          <div class="form-group">
+            <label for="target-url">Enter website URL to archive</label>
+            <input type="url" id="target-url" name="target_url" placeholder="https://example.com" 
+                   value="{{ target_url }}" required pattern="https?://.+" 
+                   title="Enter a valid URL starting with http:// or https://">
+            <label class="inline-check">
+              <input type="checkbox" name="force_refresh" value="1">
+              <span>Refresh from Archive (ignore local cache)</span>
+            </label>
+            <label class="inline-check">
+              <input type="checkbox" id="advanced-mode-toggle" name="advanced_mode" value="1">
+              <span>Advanced mode (manual limits)</span>
+            </label>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="output-root">Output folder</label>
+              <input type="text" id="output-root" name="output_root" list="output-root-options"
+                     value="{{ output_root }}" placeholder="Auto-generated from URL">
+              <div style="margin-top:8px;">
+                <button type="button" class="btn btn-secondary" id="pick-folder-btn" style="padding:6px 10px;font-size:12px;">📁 Pick Folder</button>
+              </div>
+              <div style="margin-top:6px;color:var(--muted);font-size:12px;">
+                Browser picker can only return folder name. Use manual path input for full absolute path.
+              </div>
+            </div>
+            <div class="form-group" id="inspect-advanced-panel" style="display:none;">
+              <label for="scan-mode">Inspect mode</label>
+              <select id="scan-mode">
+                <option value="quick">Quick (fast)</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="deep">Deep (slow)</option>
+              </select>
+            </div>
+          </div>
+
+          <input type="hidden" id="display-limit-input" name="display_limit" value="10">
+          <input type="hidden" id="cdx-limit-input" name="cdx_limit" value="1500">
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>&nbsp;</label>
+              <button type="submit" class="btn btn-primary" style="width: 100%;">
+                🔍 Find Snapshots
+              </button>
+            </div>
+          </div>
+
+        </form>
+
+        <div id="inspect-live" class="progress-container" style="display:none;">
+          <div class="progress-info">
+            <span id="inspect-live-text">Checking snapshots...</span>
+            <strong id="inspect-live-percent">0%</strong>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="inspect-live-bar" style="width:0%"></div>
+          </div>
+          <p id="inspect-live-detail" style="margin:8px 0 0;color:var(--muted);font-size:13px;"></p>
+          <div class="action-bar" style="margin-top:10px;padding-top:10px;">
+            <button type="button" class="btn btn-secondary" id="inspect-pause-btn" disabled>Pause</button>
+            <button type="button" class="btn btn-secondary" id="inspect-resume-btn" disabled>Resume</button>
+            <button type="button" class="btn btn-secondary" id="inspect-stop-btn" disabled>Stop</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="project-data-card" style="display:none;">
+        <h3 class="card-title">📌 Local Project Data</h3>
+        <p class="status-line" id="project-data-summary"></p>
+        <div class="status-grid" style="margin-top:10px;">
+          <div class="list-box">
+            <h5>Inspect Cache</h5>
+            <ul class="mono-list" id="project-inspect-list"></ul>
+          </div>
+          <div class="list-box">
+            <h5>Analyze Snapshots</h5>
+            <div id="project-analyze-list"></div>
+          </div>
+          <div class="list-box">
+            <h5>Sitemap Snapshots</h5>
+            <div id="project-sitemap-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="recent-projects-main">
+        <h3 class="card-title">🗂️ Recent Activity</h3>
+        <div class="detail-grid">
+          <div class="list-box">
+            <h5>Projects</h5>
+            <ul class="mono-list">
+              {% for p in recent_projects %}
+              <li data-project-row="{{ p.target_url }}">
+                <div class="recent-row">
+                  <button type="button" class="recent-item" style="width:100%;text-align:left;" data-recent-url="{{ p.target_url }}" data-recent-output="{{ p.last_output_root or output_root }}">
+                    {{ p.target_url }}
+                    <small>{{ p.last_snapshot or '-' }} | {{ p.last_site_type or 'Unknown' }}</small>
+                  </button>
+                  <button type="button" class="recent-delete" data-delete-project-url="{{ p.target_url }}" title="Remove this project">✕</button>
+                </div>
+              </li>
+              {% endfor %}
+              {% if not recent_projects %}<li>No projects yet</li>{% endif %}
+            </ul>
+          </div>
+          <div class="list-box">
+            <h5>Latest Jobs</h5>
+            <ul class="mono-list">
+              {% for j in recent_jobs %}
+              <li>
+                <strong>{{ j.job_type }}</strong> | {{ j.state }} | {{ j.created_local }}
+                <div style="color:var(--muted);">{{ j.target_url }}</div>
+              </li>
+              {% endfor %}
+              {% if not recent_jobs %}<li>No jobs yet</li>{% endif %}
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Messages -->
+      {% if error %}
+      <div class="alert alert-error">
+        <span>⚠️</span>
+        <span>{{ error }}</span>
+      </div>
+      {% endif %}
+
+      {% if action_message %}
+      <div class="alert alert-success">
+        <span>✓</span>
+        <span>{{ action_message }}</span>
+      </div>
+      {% endif %}
+
+      <!-- Results Section -->
+      {% if inspect %}
+      <div class="card" id="inspect-results">
+        <h3 class="card-title">📊 Snapshot Overview</h3>
+        {% if inspect._cache %}
+        <div class="cache-note">
+          <span class="cache-badge">Source: {{ inspect._cache.source }}</span>
+          <span class="cache-badge">Age: {{ inspect._cache.age_seconds }}s</span>
+        </div>
+        {% endif %}
+        {% if inspect.fallback_used %}
+        <div class="alert" style="background: rgba(201,162,39,0.12); border:1px solid rgba(201,162,39,0.25); color:#7a6015; margin-top:8px;">
+          <span>⚠️</span>
+          <span>Quick fallback mode used due Wayback slowness. You can click "Load More Snapshots" for deeper results.</span>
+        </div>
+        {% endif %}
+        
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value">{{ inspect.total_snapshots }}</div>
+            <div class="stat-label">Total Captures</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">{{ inspect.total_ok_snapshots }}</div>
+            <div class="stat-label">Available (200)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">{{ inspect.snapshots|length }}</div>
+            <div class="stat-label">Showing</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">{{ inspect.latest_snapshot[:4] }}</div>
+            <div class="stat-label">Latest Year</div>
+          </div>
+        </div>
+
+        <h4 style="margin: 20px 0 12px;">📅 Recent Timeline (quick pick)</h4>
+        <div class="timeline">
+          {% for ts in inspect.snapshots[:30] %}
+            <button type="button" data-ts="{{ ts }}" class="timeline-item snapshot-chip {% if ts == (selected_snapshot or inspect.latest_ok_snapshot or inspect.latest_snapshot) %}active{% endif %}" title="{{ ts }}">
+              {{ ts[0:4] }}-{{ ts[4:6] }}-{{ ts[6:8] }}
+            </button>
+          {% endfor %}
+        </div>
+
+        <h4 style="margin: 20px 0 12px;">🎯 Confirm Snapshot</h4>
+        <form method="post" action="/analyze" id="analyze-form" class="form-row">
+          <input type="hidden" name="target_url" value="{{ inspect.target_url }}">
+          <input type="hidden" name="output_root" value="{{ output_root }}">
+          <input type="hidden" name="display_limit" value="{{ inspect.display_limit or 10 }}">
+          <div class="form-group">
+            <label>Snapshot time</label>
+            <select name="selected_snapshot" id="selected-snapshot">
+              {% for ts in inspect.snapshots %}
+              <option value="{{ ts }}" {% if ts == (selected_snapshot or inspect.latest_ok_snapshot or inspect.latest_snapshot) %}selected{% endif %}>{{ ts }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <input type="hidden" name="cdx_limit" value="12000">
+            <div id="analyze-advanced-panel" style="display:none;">
+              <label>Analysis mode</label>
+              <select name="cdx_limit" id="analyze-depth">
+                <option value="1500">Quick</option>
+                <option value="5000">Balanced</option>
+                <option value="12000" selected>Deep</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button type="submit" class="btn btn-primary" style="width:100%;">Analyze Selected Snapshot</button>
+          </div>
+        </form>
+
+        <div id="analyze-live" class="progress-container" style="display:none;">
+          <div class="progress-info"><span id="analyze-live-text">Analyzing...</span><strong id="analyze-live-percent">0%</strong></div>
+          <div class="progress-bar"><div class="progress-fill" id="analyze-live-bar" style="width:0%"></div></div>
+          <p id="analyze-live-detail" style="margin:8px 0 0;color:var(--muted);font-size:13px;"></p>
+          <div class="action-bar" style="margin-top:10px;padding-top:10px;">
+            <button type="button" class="btn btn-secondary" id="analyze-pause-btn" disabled>Pause</button>
+            <button type="button" class="btn btn-secondary" id="analyze-resume-btn" disabled>Resume</button>
+            <button type="button" class="btn btn-secondary" id="analyze-stop-btn" disabled>Stop</button>
+          </div>
+        </div>
+
+        <h4 style="margin: 16px 0 10px;">🧪 Analyze Multiple Snapshots (one-by-one)</h4>
+        <form id="analyze-batch-form" class="form-row">
+          <input type="hidden" name="target_url" value="{{ inspect.target_url }}">
+          <input type="hidden" name="output_root" value="{{ output_root }}">
+          <input type="hidden" name="display_limit" value="{{ inspect.display_limit or 10 }}">
+          <input type="hidden" name="inspect_cdx_limit" value="{{ inspect.cdx_limit or 1500 }}">
+          <input type="hidden" name="analyze_count" id="analyze-count-input" value="100000">
+          <input type="hidden" name="analyze_cdx_limit" id="analyze-cdx-input" value="12000">
+          <div class="form-group" style="grid-column: span 2;">
+            <div id="batch-advanced-panel" style="display:none;">
+              <label>Batch analysis options</label>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>How many snapshots</label>
+                  <input type="number" id="analyze-count-advanced" min="1" max="100000" value="100000">
+                </div>
+                <div class="form-group">
+                  <label>Detail mode per snapshot</label>
+                  <select id="analyze-cdx-advanced">
+                    <option value="1500">Quick</option>
+                    <option value="5000">Balanced</option>
+                    <option value="12000" selected>Deep</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button type="submit" class="btn btn-secondary" style="width:100%;">Run Deep Step-by-Step Analysis</button>
+          </div>
+        </form>
+
+        <div id="analyze-batch-live" class="progress-container" style="display:none;">
+          <div class="progress-info"><span id="analyze-batch-text">Analyzing snapshots one-by-one...</span><strong id="analyze-batch-percent">0%</strong></div>
+          <div class="progress-bar"><div class="progress-fill" id="analyze-batch-bar" style="width:0%"></div></div>
+          <p id="analyze-batch-detail" style="margin:8px 0 0;color:var(--muted);font-size:13px;"></p>
+          <div class="action-bar" style="margin-top:10px;padding-top:10px;">
+            <button type="button" class="btn btn-secondary" id="analyze-batch-pause-btn" disabled>Pause</button>
+            <button type="button" class="btn btn-secondary" id="analyze-batch-resume-btn" disabled>Resume</button>
+            <button type="button" class="btn btn-secondary" id="analyze-batch-stop-btn" disabled>Stop</button>
+          </div>
+        </div>
+
+        <h4 style="margin: 20px 0 12px;">👁️ Latest Capture Preview</h4>
+        <div class="preview-container">
+          <div class="preview-header">
+            <span>Archive.org Preview</span>
+            <a id="preview-link" href="https://web.archive.org/web/{{ selected_snapshot or inspect.latest_ok_snapshot or inspect.latest_snapshot }}/{{ inspect.target_url }}"
+               target="_blank" style="color: var(--accent); font-size: 13px;">Open in new tab →</a>
+          </div>
+          <iframe class="preview-frame" id="preview-frame"
+                  src="https://web.archive.org/web/{{ selected_snapshot or inspect.latest_ok_snapshot or inspect.latest_snapshot }}/{{ inspect.target_url }}"
+                  loading="lazy"></iframe>
+        </div>
+
+        <div class="action-bar">
+          <form method="post" action="/inspect">
+            <input type="hidden" name="target_url" value="{{ inspect.target_url }}">
+            <input type="hidden" name="output_root" value="{{ output_root }}">
+            <input type="hidden" name="display_limit" value="{{ (inspect.display_limit or 10) + 10 }}">
+            <input type="hidden" name="cdx_limit" value="{{ (inspect.cdx_limit or 1500) + 1500 }}">
+            <button type="submit" class="btn btn-secondary">
+              Load More Snapshots
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if analysis %}
+      <div class="card" id="analyze-results">
+        <h3 class="card-title">🧠 Analysis Details</h3>
+        {% if analysis._cache %}
+        <div class="cache-note">
+          <span class="cache-badge">Source: {{ analysis._cache.source }}</span>
+          <span class="cache-badge">Age: {{ analysis._cache.age_seconds }}s</span>
+        </div>
+        {% endif %}
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value">{{ analysis.selected_snapshot[:8] }}</div>
+            <div class="stat-label">Selected Date</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">{{ analysis.estimated_files }}</div>
+            <div class="stat-label">Estimated Files</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">{{ analysis.estimated_size_human }}</div>
+            <div class="stat-label">Estimated Size</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">{{ analysis.site_type }}</div>
+            <div class="stat-label">Detected Type</div>
+          </div>
+        </div>
+
+        <div class="action-bar" id="download-results">
+          <form method="post" action="/download" id="download-form-simple" class="form-row" style="width:100%;">
+            <input type="hidden" name="target_url" value="{{ analysis.target_url }}">
+            <input type="hidden" name="selected_snapshot" value="{{ analysis.selected_snapshot }}">
+            <input type="hidden" name="output_root" value="{{ output_root }}">
+            <div class="form-group">
+              <label>Max files (default safe)</label>
+              <input type="number" name="max_files" min="50" max="5000" value="500">
+            </div>
+            <div class="form-group">
+              <label>&nbsp;</label>
+              <button type="submit" class="btn btn-success" style="width:100%;">Next: Download Offline Copy</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="download-live" class="progress-container" style="display:none;">
+          <div class="progress-info">
+            <span id="download-live-text">Preparing download...</span>
+            <strong id="download-live-percent">0%</strong>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="download-live-bar" style="width:0%"></div></div>
+          <p id="download-live-detail" style="margin:8px 0 0;color:var(--muted);font-size:13px;"></p>
+          <div class="action-bar" style="margin-top:10px;padding-top:10px;">
+            <button type="button" class="btn btn-secondary" id="download-pause-btn" disabled>Pause</button>
+            <button type="button" class="btn btn-secondary" id="download-resume-btn" disabled>Resume</button>
+            <button type="button" class="btn btn-secondary" id="download-stop-btn" disabled>Stop</button>
+          </div>
+        </div>
+
+        <div class="action-bar" style="margin-top:14px;">
+          <form method="post" action="/sitemap" id="sitemap-form">
+            <input type="hidden" name="target_url" value="{{ analysis.target_url }}">
+            <input type="hidden" name="selected_snapshot" value="{{ analysis.selected_snapshot }}">
+            <input type="hidden" name="output_root" value="{{ output_root }}">
+            <input type="hidden" name="cdx_limit" value="1500">
+            <button type="submit" class="btn btn-secondary">Show Sitemap Details</button>
+          </form>
+          <form method="post" action="/check" id="check-form">
+            <input type="hidden" name="target_url" value="{{ analysis.target_url }}">
+            <input type="hidden" name="selected_snapshot" value="{{ analysis.selected_snapshot }}">
+            <input type="hidden" name="output_root" value="{{ output_root }}">
+            <button type="submit" class="btn btn-secondary">Check Have vs Missing</button>
+          </form>
+        </div>
+
+        <div id="sitemap-live" class="progress-container" style="display:none;">
+          <div class="progress-info"><span id="sitemap-live-text">Building sitemap...</span><strong id="sitemap-live-percent">0%</strong></div>
+          <div class="progress-bar"><div class="progress-fill" id="sitemap-live-bar" style="width:0%"></div></div>
+          <p id="sitemap-live-detail" style="margin:8px 0 0;color:var(--muted);font-size:13px;"></p>
+          <div class="action-bar" style="margin-top:10px;padding-top:10px;">
+            <button type="button" class="btn btn-secondary" id="sitemap-pause-btn" disabled>Pause</button>
+            <button type="button" class="btn btn-secondary" id="sitemap-resume-btn" disabled>Resume</button>
+            <button type="button" class="btn btn-secondary" id="sitemap-stop-btn" disabled>Stop</button>
+          </div>
+        </div>
+
+        <div id="check-live" class="progress-container" style="display:none;">
+          <div class="progress-info"><span id="check-live-text">Checking files...</span><strong id="check-live-percent">0%</strong></div>
+          <div class="progress-bar"><div class="progress-fill" id="check-live-bar" style="width:0%"></div></div>
+          <p id="check-live-detail" style="margin:8px 0 0;color:var(--muted);font-size:13px;"></p>
+          <div class="action-bar" style="margin-top:10px;padding-top:10px;">
+            <button type="button" class="btn btn-secondary" id="check-pause-btn" disabled>Pause</button>
+            <button type="button" class="btn btn-secondary" id="check-resume-btn" disabled>Resume</button>
+            <button type="button" class="btn btn-secondary" id="check-stop-btn" disabled>Stop</button>
+          </div>
+        </div>
+
+        {% if analysis.wordpress and analysis.wordpress.detected %}
+        <h4 style="margin:18px 0 10px;">WordPress Detection</h4>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-value">{{ analysis.wordpress.themes|length }}</div><div class="stat-label">Themes</div></div>
+          <div class="stat-card"><div class="stat-value">{{ analysis.wordpress.plugins|length }}</div><div class="stat-label">Plugins</div></div>
+          <div class="stat-card"><div class="stat-value">{{ analysis.wordpress.categories|length }}</div><div class="stat-label">Categories</div></div>
+          <div class="stat-card"><div class="stat-value">{{ analysis.wordpress.tags|length }}</div><div class="stat-label">Tags</div></div>
+        </div>
+
+        <div class="detail-grid">
+          <div class="list-box">
+            <h5>Themes</h5>
+            <ul>
+              {% for x in analysis.wordpress.themes %}<li>{{ x }}</li>{% endfor %}
+              {% if not analysis.wordpress.themes %}<li>None detected</li>{% endif %}
+            </ul>
+          </div>
+          <div class="list-box">
+            <h5>Plugins</h5>
+            <ul>
+              {% for x in analysis.wordpress.plugins %}<li>{{ x }}</li>{% endfor %}
+              {% if not analysis.wordpress.plugins %}<li>None detected</li>{% endif %}
+            </ul>
+          </div>
+          <div class="list-box">
+            <h5>Categories</h5>
+            <ul>
+              {% for x in analysis.wordpress.categories %}<li>{{ x }}</li>{% endfor %}
+              {% if not analysis.wordpress.categories %}<li>None detected</li>{% endif %}
+            </ul>
+          </div>
+          <div class="list-box">
+            <h5>Tags</h5>
+            <ul>
+              {% for x in analysis.wordpress.tags %}<li>{{ x }}</li>{% endfor %}
+              {% if not analysis.wordpress.tags %}<li>None detected</li>{% endif %}
+            </ul>
+          </div>
+        </div>
+
+        <div class="detail-grid">
+          <div class="list-box">
+            <h5>Post Types</h5>
+            <ul>
+              {% for x in analysis.wordpress.post_types %}<li>{{ x }}</li>{% endfor %}
+              {% if not analysis.wordpress.post_types %}<li>None detected</li>{% endif %}
+            </ul>
+          </div>
+          <div class="list-box">
+            <h5>Blog URLs (sample)</h5>
+            <ul class="mono-list">
+              {% for x in analysis.wordpress.blog_posts %}<li>{{ x }}</li>{% endfor %}
+              {% if not analysis.wordpress.blog_posts %}<li>None detected</li>{% endif %}
+            </ul>
+          </div>
+          <div class="list-box" style="grid-column: 1 / -1;">
+            <h5>WP JSON Routes (sample)</h5>
+            <ul class="mono-list">
+              {% for x in analysis.wordpress.wp_json_routes %}<li>{{ x }}</li>{% endfor %}
+              {% if not analysis.wordpress.wp_json_routes %}<li>None detected</li>{% endif %}
+            </ul>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if sitemap %}
+      <div class="card" id="sitemap-results">
+        <h3 class="card-title">🗺️ Sitemap View</h3>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-value">{{ sitemap.total_pages }}</div><div class="stat-label">Pages</div></div>
+          <div class="stat-card"><div class="stat-value">{{ sitemap.groups|length }}</div><div class="stat-label">Folder groups</div></div>
+          <div class="stat-card"><div class="stat-value">{{ (sitemap.top_folders or [])|length }}</div><div class="stat-label">Top folders</div></div>
+          <div class="stat-card"><div class="stat-value">{{ (sitemap.pages or [])|length }}</div><div class="stat-label">Known URLs</div></div>
+        </div>
+
+        <div class="action-bar" style="margin-top:10px;">
+          <form method="post" action="/sitemap/export/json">
+            <input type="hidden" name="target_url" value="{{ target_url }}">
+            <input type="hidden" name="selected_snapshot" value="{{ selected_snapshot }}">
+            <button type="submit" class="btn btn-secondary">Export JSON</button>
+          </form>
+          <form method="post" action="/sitemap/export/csv">
+            <input type="hidden" name="target_url" value="{{ target_url }}">
+            <input type="hidden" name="selected_snapshot" value="{{ selected_snapshot }}">
+            <button type="submit" class="btn btn-secondary">Export CSV</button>
+          </form>
+        </div>
+
+        <div class="detail-grid">
+          <div class="list-box">
+            <h5>Top Folders</h5>
+            <ul class="mono-list">
+              {% for item in sitemap.top_folders %}<li>{{ item[0] }} ({{ item[1] }})</li>{% endfor %}
+              {% if not sitemap.top_folders %}<li>No folder data</li>{% endif %}
+            </ul>
+          </div>
+          <div class="list-box">
+            <h5>Pages (sample)</h5>
+            <ul class="mono-list">
+              {% for p in sitemap.pages[:200] %}<li>{{ p }}</li>{% endfor %}
+              {% if not sitemap.pages %}<li>No pages</li>{% endif %}
+            </ul>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if check %}
+      <div class="card" id="check-results">
+        <h3 class="card-title">🧩 Have vs Missing</h3>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-value">{{ check.have_count }}</div><div class="stat-label">Matched</div></div>
+          <div class="stat-card"><div class="stat-value">{{ check.missing_count }}</div><div class="stat-label">Missing</div></div>
+          <div class="stat-card"><div class="stat-value">{{ check.coverage_percent }}%</div><div class="stat-label">Coverage</div></div>
+          <div class="stat-card"><div class="stat-value">{{ check.downloaded_size_human }}</div><div class="stat-label">Downloaded size</div></div>
+        </div>
+        <form method="post" action="/download-missing" id="missing-form" class="form-row" style="margin-top:10px;">
+          <input type="hidden" name="target_url" value="{{ check.target_url }}">
+          <input type="hidden" name="selected_snapshot" value="{{ check.snapshot }}">
+          <input type="hidden" name="output_root" value="{{ output_root }}">
+          <div class="form-group">
+            <label>Missing files to try</label>
+            <input type="number" name="missing_limit" min="1" max="5000" value="300">
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button type="submit" class="btn btn-secondary" style="width:100%;">Download Missing Files</button>
+          </div>
+        </form>
+
+        <div class="detail-grid">
+          <div class="list-box">
+            <h5>Missing URLs (sample)</h5>
+            <ul class="mono-list">
+              {% for u in check.missing_urls %}<li>{{ u }}</li>{% endfor %}
+              {% if not check.missing_urls %}<li>No missing URLs</li>{% endif %}
+            </ul>
+          </div>
+          <div class="list-box">
+            <h5>Matched URLs (sample)</h5>
+            <ul class="mono-list">
+              {% for u in check.have_urls %}<li>{{ u }}</li>{% endfor %}
+              {% if not check.have_urls %}<li>No matched URLs listed</li>{% endif %}
+            </ul>
+          </div>
+        </div>
+
+        <div id="missing-live" class="progress-container" style="display:none;">
+          <div class="progress-info">
+            <span id="missing-live-text">Preparing missing download...</span>
+            <strong id="missing-live-percent">0%</strong>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="missing-live-bar" style="width:0%"></div></div>
+          <p id="missing-live-detail" style="margin:8px 0 0;color:var(--muted);font-size:13px;"></p>
+          <div class="action-bar" style="margin-top:10px;padding-top:10px;">
+            <button type="button" class="btn btn-secondary" id="missing-pause-btn" disabled>Pause</button>
+            <button type="button" class="btn btn-secondary" id="missing-resume-btn" disabled>Resume</button>
+            <button type="button" class="btn btn-secondary" id="missing-stop-btn" disabled>Stop</button>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if result %}
+      <div class="card" id="download-finished">
+        <h3 class="card-title">✅ Download Result</h3>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-value">{{ result.files_downloaded }}</div><div class="stat-label">Downloaded</div></div>
+          <div class="stat-card"><div class="stat-value">{{ result.files_recovered }}</div><div class="stat-label">Recovered</div></div>
+          <div class="stat-card"><div class="stat-value">{{ result.coverage_percent }}%</div><div class="stat-label">Coverage</div></div>
+          <div class="stat-card"><div class="stat-value">{{ result.seconds }}s</div><div class="stat-label">Duration</div></div>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="log-panel" id="log-panel">
+        <div class="log-header">
+          <h4>
+            📋 Activity Log
+            <span class="log-badge" id="log-count">0</span>
+          </h4>
+          <div class="log-actions">
+            <button type="button" onclick="clearLog()" title="Clear">🗑️</button>
+          </div>
+        </div>
+        <div class="log-content" id="log-content">
+          <div class="log-entry">Ready to start. Enter a URL and click "Find Snapshots"</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="step-overlay" id="step-overlay" aria-hidden="true">
+    <div class="step-overlay-card">
+      <div class="step-overlay-head">
+        <div class="spin"></div>
+        <strong id="step-overlay-title">Working...</strong>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="step-overlay-bar" style="width: 8%"></div></div>
+      <p id="step-overlay-detail" style="margin:8px 0 0;color:var(--muted);font-size:13px;">Please wait...</p>
+      <ul class="step-list" id="step-overlay-list"></ul>
+    </div>
+  </div>
+
+  <script>
+    const CSRF_TOKEN = "{{ csrf_token }}";
+    const _rawFetch = window.fetch.bind(window);
+    window.fetch = async function(input, init) {
+      const opts = init ? { ...init } : {};
+      const method = String((opts.method || 'GET')).toUpperCase();
+      if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
+        const headers = new Headers(opts.headers || {});
+        if (CSRF_TOKEN) headers.set('X-CSRF-Token', CSRF_TOKEN);
+        opts.headers = headers;
+      }
+      const response = await _rawFetch(input, opts);
+      if (response.status === 429) {
+        console.warn('Too many active jobs. Wait for running jobs to finish.');
+      }
+      if (response.status === 403) {
+        try {
+          const payload = await response.clone().json();
+          const message = String((payload || {}).error || '').toLowerCase();
+          if (message.includes('csrf')) {
+            alert('Security token expired. Reloading page...');
+            window.setTimeout(function() { window.location.reload(); }, 700);
+          }
+        } catch (_e) {
+          // ignore non-json 403
+        }
+      }
+      return response;
+    };
+
+    function applyScanPreset() {
+      const modeEl = document.getElementById('scan-mode');
+      const mode = (modeEl && modeEl.value) || 'balanced';
+      const displayInput = document.getElementById('display-limit-input');
+      const cdxInput = document.getElementById('cdx-limit-input');
+      if (!displayInput || !cdxInput) return;
+      if (mode === 'quick') {
+        displayInput.value = '10';
+        cdxInput.value = '1500';
+      } else if (mode === 'deep') {
+        displayInput.value = '80';
+        cdxInput.value = '12000';
+      } else {
+        displayInput.value = '30';
+        cdxInput.value = '5000';
+      }
+    }
+
+    function setAdvancedMode(enabled) {
+      const inspectPanel = document.getElementById('inspect-advanced-panel');
+      const analyzePanel = document.getElementById('analyze-advanced-panel');
+      const batchPanel = document.getElementById('batch-advanced-panel');
+      if (inspectPanel) inspectPanel.style.display = enabled ? 'block' : 'none';
+      if (analyzePanel) analyzePanel.style.display = enabled ? 'block' : 'none';
+      if (batchPanel) batchPanel.style.display = enabled ? 'block' : 'none';
+
+      if (!enabled) {
+        const displayInput = document.getElementById('display-limit-input');
+        const cdxInput = document.getElementById('cdx-limit-input');
+        const analyzeDepth = document.getElementById('analyze-depth');
+        const batchCount = document.getElementById('analyze-count-input');
+        const batchCdx = document.getElementById('analyze-cdx-input');
+        if (displayInput) displayInput.value = '10';
+        if (cdxInput) cdxInput.value = '1500';
+        if (analyzeDepth) analyzeDepth.value = '12000';
+        if (batchCount) batchCount.value = '100000';
+        if (batchCdx) batchCdx.value = '12000';
+      } else {
+        applyScanPreset();
+      }
+    }
+
+    // Logging
+    const logContent = document.getElementById('log-content');
+    const logCount = document.getElementById('log-count');
+    let logEntries = 0;
+
+    function addLog(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logContent.appendChild(entry);
+      logContent.scrollTop = logContent.scrollHeight;
+      logEntries++;
+      logCount.textContent = logEntries;
+    }
+
+    function clearLog() {
+      logContent.innerHTML = '';
+      logEntries = 0;
+      logCount.textContent = '0';
+    }
+
+    async function readApiResult(response, fallbackMessage) {
+      let data = null;
+      try {
+        data = await response.json();
+      } catch (_e) {
+        data = { ok: false, error: fallbackMessage || `Request failed (${response.status})` };
+      }
+      if (!response.ok || !data || data.ok === false) {
+        const message = (data && data.error) ? data.error : (fallbackMessage || `Request failed (${response.status})`);
+        if (response.status === 429) {
+          addLog('Too many active jobs. Please wait for running jobs.', 'warning');
+        }
+        throw new Error(message);
+      }
+      return data;
+    }
+
+    function formatElapsedSeconds(sec) {
+      const safe = Math.max(0, Number(sec || 0));
+      const m = Math.floor(safe / 60);
+      const s = Math.floor(safe % 60);
+      if (m <= 0) return `${s}s`;
+      return `${m}m ${s}s`;
+    }
+
+    function detailFromProgress(progress, extras) {
+      const p = progress || {};
+      const stage = p.stage || '-';
+      const elapsed = formatElapsedSeconds(p.elapsed_seconds || 0);
+      const current = p.current_item || '-';
+      const parts = [`stage ${stage}`, `elapsed ${elapsed}`, `item ${current}`];
+      (extras || []).forEach(function(x) {
+        if (x) parts.push(x);
+      });
+      return parts.join(' | ');
+    }
+
+    function applySnapshotToPicker(snapshot) {
+      const sel = document.getElementById('selected-snapshot');
+      if (!sel || !snapshot) return;
+      const hasOption = Array.from(sel.options || []).some(function(opt) { return opt.value === snapshot; });
+      if (!hasOption) return;
+      sel.value = snapshot;
+      sel.dispatchEvent(new Event('change'));
+      addLog('Snapshot selected from local data: ' + snapshot, 'info');
+    }
+
+    function renderProjectSnapshotChips(container, rows) {
+      if (!container) return;
+      container.innerHTML = '';
+      if (!rows || !rows.length) {
+        container.innerHTML = '<div class="status-line">No local snapshot data yet</div>';
+        return;
+      }
+      rows.forEach(function(row) {
+        const ts = row.snapshot || '';
+        if (!ts) return;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'snap-chip';
+        b.textContent = `${ts} (${row.age_seconds || 0}s)`;
+        b.title = `Use snapshot ${ts}`;
+        b.addEventListener('click', function() {
+          applySnapshotToPicker(ts);
+        });
+        container.appendChild(b);
+      });
+    }
+
+    async function loadProjectDataStatus(url) {
+      const card = document.getElementById('project-data-card');
+      const summary = document.getElementById('project-data-summary');
+      const inspectList = document.getElementById('project-inspect-list');
+      const analyzeList = document.getElementById('project-analyze-list');
+      const sitemapList = document.getElementById('project-sitemap-list');
+      if (!card || !summary || !inspectList || !analyzeList || !sitemapList) return;
+
+      const target = (url || '').trim();
+      if (!target) {
+        card.style.display = 'none';
+        return;
+      }
+
+      try {
+        const res = await fetch('/project/data-status?target_url=' + encodeURIComponent(target));
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Could not load project status');
+        const s = data.status || {};
+        const project = s.project || {};
+        const inspect = s.inspect || {};
+        const analyze = s.analyze || { count: 0, snapshots: [] };
+        const sitemap = s.sitemap || { count: 0, snapshots: [] };
+
+        card.style.display = 'block';
+        summary.textContent = `Snapshot searched first: ${inspect.first_found_snapshot || '-'} | latest found: ${inspect.latest_found_snapshot || '-'} | project last snapshot: ${project.last_snapshot || '-'} | cache-first mode active`;
+
+        inspectList.innerHTML = '';
+        const inspectItems = [
+          `has data: ${inspect.has_data ? 'yes' : 'no'}`,
+          `total captures: ${inspect.total_snapshots || 0}`,
+          `ok captures: ${inspect.total_ok_snapshots || 0}`,
+          `latest ok snapshot: ${inspect.latest_ok_snapshot || '-'}`,
+          `last inspect cache age: ${inspect.age_seconds || 0}s`
+        ];
+        inspectItems.forEach(function(t) {
+          const li = document.createElement('li');
+          li.textContent = t;
+          inspectList.appendChild(li);
+        });
+
+        renderProjectSnapshotChips(analyzeList, analyze.snapshots || []);
+        renderProjectSnapshotChips(sitemapList, sitemap.snapshots || []);
+      } catch (e) {
+        addLog('Project data status error: ' + e.message, 'error');
+      }
+    }
+
+    // Global loading animation for non-async steps
+    const stepOverlay = document.getElementById('step-overlay');
+    const stepOverlayTitle = document.getElementById('step-overlay-title');
+    const stepOverlayBar = document.getElementById('step-overlay-bar');
+    const stepOverlayDetail = document.getElementById('step-overlay-detail');
+    const stepOverlayList = document.getElementById('step-overlay-list');
+    let stepOverlayTimer = null;
+
+    function showStepOverlay(title, detail, steps) {
+      if (!stepOverlay) return;
+      stepOverlayTitle.textContent = title || 'Working...';
+      stepOverlayDetail.textContent = detail || 'Please wait...';
+      let idx = 0;
+      let pct = 10;
+
+      stepOverlayList.innerHTML = (steps || [])
+        .map((s, i) => `<li class="${i === 0 ? 'active' : ''}">${s}</li>`)
+        .join('');
+      stepOverlayBar.style.width = pct + '%';
+      stepOverlay.classList.add('show');
+      stepOverlay.setAttribute('aria-hidden', 'false');
+
+      if (stepOverlayTimer) clearInterval(stepOverlayTimer);
+      stepOverlayTimer = setInterval(() => {
+        pct = Math.min(92, pct + 9);
+        stepOverlayBar.style.width = pct + '%';
+        if (stepOverlayList.children.length > 0) {
+          idx = Math.min(idx + 1, stepOverlayList.children.length - 1);
+          [...stepOverlayList.children].forEach((li, i) => li.classList.toggle('active', i === idx));
+        }
+      }, 700);
+    }
+
+    // Auto-generate output folder from URL
+    document.getElementById('target-url').addEventListener('blur', function() {
+      const url = this.value.trim();
+      const outputInput = document.getElementById('output-root');
+      
+      if (url && !outputInput.value) {
+        try {
+          const domain = new URL(url).hostname.replace(/^www\./, '');
+          const date = new Date().toISOString().slice(0,10);
+          outputInput.value = `./output/${domain}_${date}`;
+          addLog(`Auto-set output folder: ${outputInput.value}`);
+        } catch (e) {
+          // Invalid URL, ignore
+        }
+      }
+
+      if (url) {
+        loadProjectDataStatus(url);
+      }
+    });
+
+    const advancedModeToggle = document.getElementById('advanced-mode-toggle');
+    if (advancedModeToggle) {
+      setAdvancedMode(!!advancedModeToggle.checked);
+      advancedModeToggle.addEventListener('change', function() {
+        setAdvancedMode(!!advancedModeToggle.checked);
+      });
+    }
+
+    const scanMode = document.getElementById('scan-mode');
+    if (scanMode) {
+      scanMode.addEventListener('change', function() {
+        applyScanPreset();
+      });
+    }
+
+    const analyzeCountAdvanced = document.getElementById('analyze-count-advanced');
+    const analyzeCdxAdvanced = document.getElementById('analyze-cdx-advanced');
+    const analyzeCountInput = document.getElementById('analyze-count-input');
+    const analyzeCdxInput = document.getElementById('analyze-cdx-input');
+    if (analyzeCountAdvanced && analyzeCountInput) {
+      analyzeCountAdvanced.addEventListener('input', function() {
+        analyzeCountInput.value = analyzeCountAdvanced.value || '100000';
+      });
+    }
+    if (analyzeCdxAdvanced && analyzeCdxInput) {
+      analyzeCdxAdvanced.addEventListener('change', function() {
+        analyzeCdxInput.value = analyzeCdxAdvanced.value || '12000';
+      });
+    }
+
+    document.querySelectorAll('[data-recent-url]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const url = btn.getAttribute('data-recent-url') || '';
+        const out = btn.getAttribute('data-recent-output') || '';
+        const u = document.getElementById('target-url');
+        const o = document.getElementById('output-root');
+        if (u) u.value = url;
+        if (o && out) o.value = out;
+        addLog('Loaded recent project: ' + url, 'info');
+        loadProjectDataStatus(url);
+      });
+    });
+
+    document.querySelectorAll('[data-delete-project-url]').forEach(function(btn) {
+      btn.addEventListener('click', async function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const url = btn.getAttribute('data-delete-project-url') || '';
+        if (!url) return;
+        const ok = window.confirm(`Delete recent project and related local cache?\n\n${url}`);
+        if (!ok) return;
+
+        try {
+          const res = await fetch('/recent-projects/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_url: url, purge_related: true })
+          });
+          await readApiResult(res, 'Delete failed');
+
+          document.querySelectorAll(`[data-project-row="${CSS.escape(url)}"]`).forEach(function(row) {
+            row.remove();
+          });
+          addLog(`Deleted recent project: ${url}`, 'warning');
+          window.setTimeout(function() {
+            window.location.reload();
+          }, 250);
+        } catch (e) {
+          addLog('Delete failed: ' + e.message, 'error');
+        }
+      });
+    });
+
+    document.querySelectorAll('form').forEach(function(form) {
+      if (CSRF_TOKEN && !form.querySelector('input[name="csrf_token"]')) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'csrf_token';
+        input.value = CSRF_TOKEN;
+        form.appendChild(input);
+      }
+    });
+
+    const pickFolderBtn = document.getElementById('pick-folder-btn');
+    if (pickFolderBtn) {
+      pickFolderBtn.addEventListener('click', async function() {
+        const outputInput = document.getElementById('output-root');
+        if (!outputInput) return;
+        if (!window.showDirectoryPicker) {
+          addLog('Folder picker is not supported in this browser; type path manually.', 'warning');
+          alert('Folder picker is not supported in this browser. Please type folder path manually.');
+          return;
+        }
+        try {
+          const handle = await window.showDirectoryPicker();
+          outputInput.value = outputInput.value || (`./output/${handle.name}`);
+          addLog(`Folder selected: ${handle.name} (browser security hides full path)`, 'info');
+        } catch (e) {
+          addLog('Folder selection cancelled', 'warning');
+        }
+      });
+    }
+
+    let inspectJobId = '';
+    let inspectTimer = null;
+    const inspectPauseBtn = document.getElementById('inspect-pause-btn');
+    const inspectResumeBtn = document.getElementById('inspect-resume-btn');
+    const inspectStopBtn = document.getElementById('inspect-stop-btn');
+
+    function setInspectButtons(state) {
+      const active = !!inspectJobId;
+      if (!inspectPauseBtn || !inspectResumeBtn || !inspectStopBtn) return;
+      inspectPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
+      inspectResumeBtn.disabled = !active || state !== 'paused';
+      inspectStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
+    }
+
+    // Inspect submission with real progress bar
+    document.getElementById('inspect-form').addEventListener('submit', async function(ev) {
+      ev.preventDefault();
+      const form = ev.currentTarget;
+      if (advancedModeToggle && advancedModeToggle.checked) {
+        applyScanPreset();
+      }
+      const url = document.getElementById('target-url').value;
+      const live = document.getElementById('inspect-live');
+      const bar = document.getElementById('inspect-live-bar');
+      const pct = document.getElementById('inspect-live-percent');
+      const text = document.getElementById('inspect-live-text');
+      const detail = document.getElementById('inspect-live-detail');
+      const status = document.getElementById('status-indicator');
+
+      addLog(`Starting inspection for: ${url}`, 'info');
+      live.style.display = 'block';
+      if (status) {
+        status.className = 'status-pill running';
+        status.textContent = 'Running';
+      }
+
+      try {
+        const startRes = await fetch('/inspect/start', { method: 'POST', body: new FormData(form) });
+        const start = await readApiResult(startRes, 'Could not start inspect job');
+
+        inspectJobId = start.job_id;
+        if (start.cached) {
+          addLog('Inspect loaded from local cache', 'success');
+        }
+        addLog(`Inspect job started: ${inspectJobId}`, 'info');
+        setInspectButtons('running');
+
+        let lastInspectLine = '';
+        inspectTimer = setInterval(async function() {
+          try {
+            const res = await fetch('/inspect/status/' + inspectJobId);
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || 'Status error');
+
+            const progress = data.progress || {};
+            const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+            bar.style.width = percent + '%';
+            pct.textContent = percent + '%';
+            text.textContent = progress.message || 'Checking snapshots...';
+            const cachePart = progress.cache_source ? `cache ${progress.cache_source} (${progress.cache_age_seconds || 0}s)` : '';
+            detail.textContent = detailFromProgress(progress, [
+              `captures ${progress.total_captures || 0}`,
+              cachePart
+            ]);
+            setInspectButtons(data.state || 'running');
+
+            const inspectLine = `inspect ${percent}% | variants ${progress.variants_done || 0}/${progress.variants_total || 0} | captures ${progress.total_captures || 0}`;
+            if (inspectLine !== lastInspectLine) {
+              addLog(inspectLine, 'info');
+              lastInspectLine = inspectLine;
+            }
+
+            if (data.state === 'done') {
+              clearInterval(inspectTimer);
+              inspectTimer = null;
+              addLog('Inspect completed', 'success');
+              if (status) {
+                status.className = 'status-pill success';
+                status.textContent = 'Done';
+              }
+              setInspectButtons('done');
+              window.location.href = '/inspect/result/' + inspectJobId;
+            }
+
+            if (data.state === 'error') {
+              clearInterval(inspectTimer);
+              inspectTimer = null;
+              throw new Error(data.error || 'Inspect failed');
+            }
+          } catch (e) {
+            clearInterval(inspectTimer);
+            inspectTimer = null;
+            addLog('Inspect error: ' + e.message, 'error');
+            if (status) {
+              status.className = 'status-pill error';
+              status.textContent = 'Error';
+            }
+            detail.textContent = e.message;
+            setInspectButtons('error');
+          }
+        }, 900);
+      } catch (e) {
+        addLog('Inspect start failed: ' + e.message, 'error');
+        if (status) {
+          status.className = 'status-pill error';
+          status.textContent = 'Error';
+        }
+        text.textContent = 'Could not start';
+        detail.textContent = e.message;
+        setInspectButtons('error');
+      }
+    });
+
+    // Non-async forms: show loading animation + detailed logs
+    document.querySelectorAll('form').forEach(function(form) {
+      if (form.id === 'inspect-form' || form.id === 'analyze-form' || form.id === 'analyze-batch-form' || form.id === 'sitemap-form' || form.id === 'check-form' || form.id === 'download-form-simple' || form.id === 'missing-form') return;
+      form.addEventListener('submit', function() {
+        const action = form.getAttribute('action') || '';
+        const target = (form.querySelector('[name="target_url"]') || {}).value || '';
+        const snap = (form.querySelector('[name="selected_snapshot"]') || {}).value || '';
+        const limit = (form.querySelector('[name="max_files"]') || form.querySelector('[name="missing_limit"]') || {}).value || '';
+
+        if (action.includes('/analyze')) {
+          addLog(`Analyze start | snapshot: ${snap || 'latest'} | url: ${target}`, 'warning');
+          showStepOverlay(
+            'Analyzing Snapshot',
+            'Collecting structure, file inventory, and platform signals...',
+            ['Read snapshot metadata', 'Scan URLs and folders', 'Detect CMS and signals', 'Build analysis report']
+          );
+        } else if (action.includes('/download-missing')) {
+          addLog(`Missing download start | limit: ${limit || '-'} | snapshot: ${snap || 'latest'}`, 'warning');
+          showStepOverlay(
+            'Downloading Missing Files',
+            'Finding missing assets and trying nearby snapshots...',
+            ['Load manifest', 'Find missing URLs', 'Fetch missing files', 'Update manifest']
+          );
+        } else if (action.includes('/download')) {
+          addLog(`Download start | max files: ${limit || '-'} | snapshot: ${snap || 'latest'}`, 'warning');
+          showStepOverlay(
+            'Building Offline Copy',
+            'Downloading pages/assets and fixing links for offline use...',
+            ['Queue pages and assets', 'Download archive files', 'Repair missing from older snaps', 'Rewrite links and save report']
+          );
+        } else if (action.includes('/check')) {
+          addLog('Check start | comparing downloaded files vs expected', 'warning');
+          showStepOverlay(
+            'Checking Have vs Missing',
+            'Comparing output with archive inventory...',
+            ['Load manifest', 'Build expected inventory', 'Compare have/missing', 'Prepare report']
+          );
+        } else {
+          addLog(`Action start: ${action}`, 'warning');
+          showStepOverlay('Working', 'Running requested operation...', ['Start', 'Process', 'Finalize']);
+        }
+      });
+    });
+
+    if (inspectPauseBtn) {
+      inspectPauseBtn.addEventListener('click', async function() {
+        if (!inspectJobId) return;
+        const r = await fetch('/inspect/pause/' + inspectJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Inspect paused', 'warning');
+          setInspectButtons('paused');
+        } else {
+          addLog('Pause failed: ' + (d.error || 'unknown'), 'error');
+        }
+      });
+    }
+
+    if (inspectResumeBtn) {
+      inspectResumeBtn.addEventListener('click', async function() {
+        if (!inspectJobId) return;
+        const r = await fetch('/inspect/resume/' + inspectJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Inspect resumed', 'info');
+          setInspectButtons('running');
+        } else {
+          addLog('Resume failed: ' + (d.error || 'unknown'), 'error');
+        }
+      });
+    }
+
+    if (inspectStopBtn) {
+      inspectStopBtn.addEventListener('click', async function() {
+        if (!inspectJobId) return;
+        const r = await fetch('/inspect/stop/' + inspectJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Inspect stopping requested', 'warning');
+          setInspectButtons('stopping');
+        } else {
+          addLog('Stop failed: ' + (d.error || 'unknown'), 'error');
+        }
+      });
+    }
+
+    // Initial log
+    addLog('Application loaded. Waiting for URL input.');
+    const initialTargetUrl = (document.getElementById('target-url') || {}).value || '';
+    if (initialTargetUrl.trim()) {
+      loadProjectDataStatus(initialTargetUrl.trim());
+    }
+
+    // Navigation highlighting
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        const tab = this.dataset.goTab;
+        const map = {
+          inspect: 'inspect-results',
+          analyze: 'analyze-results',
+          sitemap: 'sitemap-results',
+          check: 'check-results',
+          download: 'download-results'
+        };
+        const el = document.getElementById(map[tab] || 'inspect-results');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+
+    // Snapshot selection preview sync
+    const snapSelect = document.getElementById('selected-snapshot');
+    const previewFrame = document.getElementById('preview-frame');
+    const previewLink = document.getElementById('preview-link');
+    const targetUrlVal = (document.getElementById('target-url') || {}).value || '{{ target_url }}';
+    if (snapSelect && previewFrame && previewLink) {
+      snapSelect.addEventListener('change', function() {
+        const ts = this.value;
+        const url = `https://web.archive.org/web/${ts}/${targetUrlVal}`;
+        previewFrame.src = url;
+        previewLink.href = url;
+        addLog(`Selected snapshot: ${ts}`, 'info');
+      });
+
+      document.querySelectorAll('.snapshot-chip').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          const ts = btn.getAttribute('data-ts');
+          if (!ts) return;
+          snapSelect.value = ts;
+          snapSelect.dispatchEvent(new Event('change'));
+          document.querySelectorAll('.snapshot-chip').forEach(x => x.classList.remove('active'));
+          btn.classList.add('active');
+        });
+      });
+    }
+
+    const analyzeForm = document.getElementById('analyze-form');
+    const analyzeLive = document.getElementById('analyze-live');
+    const analyzeLiveBar = document.getElementById('analyze-live-bar');
+    const analyzeLivePct = document.getElementById('analyze-live-percent');
+    const analyzeLiveText = document.getElementById('analyze-live-text');
+    const analyzeLiveDetail = document.getElementById('analyze-live-detail');
+    const analyzePauseBtn = document.getElementById('analyze-pause-btn');
+    const analyzeResumeBtn = document.getElementById('analyze-resume-btn');
+    const analyzeStopBtn = document.getElementById('analyze-stop-btn');
+    let analyzeJobId = '';
+    let analyzeTimer = null;
+
+    function setAnalyzeButtons(state) {
+      const active = !!analyzeJobId;
+      if (!analyzePauseBtn || !analyzeResumeBtn || !analyzeStopBtn) return;
+      analyzePauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
+      analyzeResumeBtn.disabled = !active || state !== 'paused';
+      analyzeStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
+    }
+
+    if (analyzeForm) {
+      analyzeForm.addEventListener('submit', async function(ev) {
+        ev.preventDefault();
+        const ts = (snapSelect && snapSelect.value) || '';
+        addLog(`Analyzing snapshot: ${ts}`, 'warning');
+        if (analyzeLive) analyzeLive.style.display = 'block';
+        const payload = new FormData(analyzeForm);
+        const r = await fetch('/analyze/start', { method: 'POST', body: payload });
+        const d = await readApiResult(r, 'Analyze start failed');
+        analyzeJobId = d.job_id;
+        setAnalyzeButtons('running');
+
+        analyzeTimer = setInterval(async function() {
+          try {
+            const rs = await fetch('/analyze/status/' + analyzeJobId);
+            const s = await rs.json();
+            if (!s.ok) throw new Error(s.error || 'status failed');
+            const p = s.progress || {};
+            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
+            if (analyzeLiveBar) analyzeLiveBar.style.width = pct + '%';
+            if (analyzeLivePct) analyzeLivePct.textContent = pct + '%';
+            if (analyzeLiveText) analyzeLiveText.textContent = p.message || 'Analyzing...';
+            if (analyzeLiveDetail) {
+              analyzeLiveDetail.textContent = detailFromProgress(p, [
+                `${p.processed || 0}/${p.total || 0}`
+              ]);
+            }
+            setAnalyzeButtons(s.state || 'running');
+            if (s.state === 'done') {
+              clearInterval(analyzeTimer);
+              analyzeTimer = null;
+              addLog('Analyze finished', 'success');
+              window.location.href = '/analyze/result/' + analyzeJobId;
+            }
+            if (s.state === 'error') {
+              clearInterval(analyzeTimer);
+              analyzeTimer = null;
+              addLog('Analyze error: ' + (s.error || 'unknown'), 'error');
+            }
+          } catch (e) {
+            clearInterval(analyzeTimer);
+            analyzeTimer = null;
+            addLog('Analyze status error: ' + e.message, 'error');
+          }
+        }, 1200);
+      });
+    }
+
+    if (analyzePauseBtn) {
+      analyzePauseBtn.addEventListener('click', async function() {
+        if (!analyzeJobId) return;
+        const r = await fetch('/analyze/pause/' + analyzeJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Analyze paused', 'warning');
+          setAnalyzeButtons('paused');
+        }
+      });
+    }
+    if (analyzeResumeBtn) {
+      analyzeResumeBtn.addEventListener('click', async function() {
+        if (!analyzeJobId) return;
+        const r = await fetch('/analyze/resume/' + analyzeJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Analyze resumed', 'info');
+          setAnalyzeButtons('running');
+        }
+      });
+    }
+    if (analyzeStopBtn) {
+      analyzeStopBtn.addEventListener('click', async function() {
+        if (!analyzeJobId) return;
+        const r = await fetch('/analyze/stop/' + analyzeJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Analyze stopping requested', 'warning');
+          setAnalyzeButtons('stopping');
+        }
+      });
+    }
+
+    const analyzeBatchForm = document.getElementById('analyze-batch-form');
+    const analyzeBatchLive = document.getElementById('analyze-batch-live');
+    const analyzeBatchBar = document.getElementById('analyze-batch-bar');
+    const analyzeBatchPct = document.getElementById('analyze-batch-percent');
+    const analyzeBatchText = document.getElementById('analyze-batch-text');
+    const analyzeBatchDetail = document.getElementById('analyze-batch-detail');
+    const analyzeBatchPauseBtn = document.getElementById('analyze-batch-pause-btn');
+    const analyzeBatchResumeBtn = document.getElementById('analyze-batch-resume-btn');
+    const analyzeBatchStopBtn = document.getElementById('analyze-batch-stop-btn');
+    let analyzeBatchJobId = '';
+    let analyzeBatchTimer = null;
+
+    function setAnalyzeBatchButtons(state) {
+      const active = !!analyzeBatchJobId;
+      if (!analyzeBatchPauseBtn || !analyzeBatchResumeBtn || !analyzeBatchStopBtn) return;
+      analyzeBatchPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
+      analyzeBatchResumeBtn.disabled = !active || state !== 'paused';
+      analyzeBatchStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
+    }
+
+    if (analyzeBatchForm) {
+      analyzeBatchForm.addEventListener('submit', async function(ev) {
+        ev.preventDefault();
+        if (analyzeBatchLive) analyzeBatchLive.style.display = 'block';
+        addLog('Batch analyze started', 'warning');
+        const payload = new FormData(analyzeBatchForm);
+        const r = await fetch('/analyze-batch/start', { method: 'POST', body: payload });
+        const d = await readApiResult(r, 'Batch analyze start failed');
+        analyzeBatchJobId = d.job_id;
+        setAnalyzeBatchButtons('running');
+
+        analyzeBatchTimer = setInterval(async function() {
+          try {
+            const rs = await fetch('/analyze-batch/status/' + analyzeBatchJobId);
+            const s = await rs.json();
+            if (!s.ok) throw new Error(s.error || 'status failed');
+            const p = s.progress || {};
+            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
+            if (analyzeBatchBar) analyzeBatchBar.style.width = pct + '%';
+            if (analyzeBatchPct) analyzeBatchPct.textContent = pct + '%';
+            if (analyzeBatchText) analyzeBatchText.textContent = p.message || 'Batch analyzing...';
+            if (analyzeBatchDetail) {
+              analyzeBatchDetail.textContent = detailFromProgress(p, [
+                `${p.done || 0}/${p.total || 0}`,
+                p.last_site_type || ''
+              ]);
+            }
+            setAnalyzeBatchButtons(s.state || 'running');
+
+            if (s.state === 'done') {
+              clearInterval(analyzeBatchTimer);
+              analyzeBatchTimer = null;
+              addLog('Batch analyze completed', 'success');
+              const snapshots = (((s.result || {}).snapshots) || []);
+              const last = snapshots.length ? snapshots[snapshots.length - 1] : null;
+              const lastSnapshot = (last && last.snapshot) || '';
+              const analyzeFormEl = document.getElementById('analyze-form');
+              const snapSelectEl = document.getElementById('selected-snapshot');
+              if (lastSnapshot && snapSelectEl) {
+                const hasOpt = Array.from(snapSelectEl.options || []).some(function(opt) { return opt.value === lastSnapshot; });
+                if (hasOpt) snapSelectEl.value = lastSnapshot;
+              }
+              if (analyzeFormEl) {
+                addLog('Opening analysis details from saved batch result...', 'info');
+                analyzeFormEl.requestSubmit();
+              }
+            }
+            if (s.state === 'error') {
+              clearInterval(analyzeBatchTimer);
+              analyzeBatchTimer = null;
+              addLog('Batch analyze error: ' + (s.error || 'unknown'), 'error');
+            }
+          } catch (e) {
+            clearInterval(analyzeBatchTimer);
+            analyzeBatchTimer = null;
+            addLog('Batch analyze status error: ' + e.message, 'error');
+          }
+        }, 1200);
+      });
+    }
+
+    if (analyzeBatchPauseBtn) analyzeBatchPauseBtn.addEventListener('click', async function() {
+      if (!analyzeBatchJobId) return;
+      const r = await fetch('/analyze-batch/pause/' + analyzeBatchJobId, { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) { addLog('Batch analyze paused', 'warning'); setAnalyzeBatchButtons('paused'); }
+    });
+    if (analyzeBatchResumeBtn) analyzeBatchResumeBtn.addEventListener('click', async function() {
+      if (!analyzeBatchJobId) return;
+      const r = await fetch('/analyze-batch/resume/' + analyzeBatchJobId, { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) { addLog('Batch analyze resumed', 'info'); setAnalyzeBatchButtons('running'); }
+    });
+    if (analyzeBatchStopBtn) analyzeBatchStopBtn.addEventListener('click', async function() {
+      if (!analyzeBatchJobId) return;
+      const r = await fetch('/analyze-batch/stop/' + analyzeBatchJobId, { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) { addLog('Batch analyze stopping requested', 'warning'); setAnalyzeBatchButtons('stopping'); }
+    });
+
+    const sitemapForm = document.getElementById('sitemap-form');
+    const sitemapLive = document.getElementById('sitemap-live');
+    const sitemapLiveBar = document.getElementById('sitemap-live-bar');
+    const sitemapLivePct = document.getElementById('sitemap-live-percent');
+    const sitemapLiveText = document.getElementById('sitemap-live-text');
+    const sitemapLiveDetail = document.getElementById('sitemap-live-detail');
+    const sitemapPauseBtn = document.getElementById('sitemap-pause-btn');
+    const sitemapResumeBtn = document.getElementById('sitemap-resume-btn');
+    const sitemapStopBtn = document.getElementById('sitemap-stop-btn');
+    let sitemapJobId = '';
+    let sitemapTimer = null;
+
+    function setSitemapButtons(state) {
+      const active = !!sitemapJobId;
+      if (!sitemapPauseBtn || !sitemapResumeBtn || !sitemapStopBtn) return;
+      sitemapPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
+      sitemapResumeBtn.disabled = !active || state !== 'paused';
+      sitemapStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
+    }
+
+    if (sitemapForm) {
+      sitemapForm.addEventListener('submit', async function(ev) {
+        ev.preventDefault();
+        if (sitemapLive) sitemapLive.style.display = 'block';
+        addLog('Sitemap build started', 'warning');
+        const payload = new FormData(sitemapForm);
+        const r = await fetch('/sitemap/start', { method: 'POST', body: payload });
+        const d = await readApiResult(r, 'Sitemap start failed');
+        sitemapJobId = d.job_id;
+        setSitemapButtons('running');
+        sitemapTimer = setInterval(async function() {
+          try {
+            const rs = await fetch('/sitemap/status/' + sitemapJobId);
+            const s = await rs.json();
+            if (!s.ok) throw new Error(s.error || 'status failed');
+            const p = s.progress || {};
+            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
+            if (sitemapLiveBar) sitemapLiveBar.style.width = pct + '%';
+            if (sitemapLivePct) sitemapLivePct.textContent = pct + '%';
+            if (sitemapLiveText) sitemapLiveText.textContent = p.message || 'Building sitemap...';
+            if (sitemapLiveDetail) sitemapLiveDetail.textContent = detailFromProgress(p, [`${p.processed || 0}/${p.total || 0}`]);
+            setSitemapButtons(s.state || 'running');
+            if (s.state === 'done') {
+              clearInterval(sitemapTimer);
+              sitemapTimer = null;
+              addLog('Sitemap build finished', 'success');
+              window.location.href = '/sitemap/result/' + sitemapJobId;
+            }
+            if (s.state === 'error') {
+              clearInterval(sitemapTimer);
+              sitemapTimer = null;
+              addLog('Sitemap error: ' + (s.error || 'unknown'), 'error');
+            }
+          } catch (e) {
+            clearInterval(sitemapTimer);
+            sitemapTimer = null;
+            addLog('Sitemap status error: ' + e.message, 'error');
+          }
+        }, 1200);
+      });
+    }
+
+    if (sitemapPauseBtn) sitemapPauseBtn.addEventListener('click', async function() {
+      if (!sitemapJobId) return;
+      const r = await fetch('/sitemap/pause/' + sitemapJobId, { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) { addLog('Sitemap paused', 'warning'); setSitemapButtons('paused'); }
+    });
+    if (sitemapResumeBtn) sitemapResumeBtn.addEventListener('click', async function() {
+      if (!sitemapJobId) return;
+      const r = await fetch('/sitemap/resume/' + sitemapJobId, { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) { addLog('Sitemap resumed', 'info'); setSitemapButtons('running'); }
+    });
+    if (sitemapStopBtn) sitemapStopBtn.addEventListener('click', async function() {
+      if (!sitemapJobId) return;
+      const r = await fetch('/sitemap/stop/' + sitemapJobId, { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) { addLog('Sitemap stopping requested', 'warning'); setSitemapButtons('stopping'); }
+    });
+
+    const checkForm = document.getElementById('check-form');
+    const checkLive = document.getElementById('check-live');
+    const checkLiveBar = document.getElementById('check-live-bar');
+    const checkLivePct = document.getElementById('check-live-percent');
+    const checkLiveText = document.getElementById('check-live-text');
+    const checkLiveDetail = document.getElementById('check-live-detail');
+    const checkPauseBtn = document.getElementById('check-pause-btn');
+    const checkResumeBtn = document.getElementById('check-resume-btn');
+    const checkStopBtn = document.getElementById('check-stop-btn');
+    let checkJobId = '';
+    let checkTimer = null;
+
+    function setCheckButtons(state) {
+      const active = !!checkJobId;
+      if (!checkPauseBtn || !checkResumeBtn || !checkStopBtn) return;
+      checkPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
+      checkResumeBtn.disabled = !active || state !== 'paused';
+      checkStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
+    }
+
+    if (checkForm) {
+      checkForm.addEventListener('submit', async function(ev) {
+        ev.preventDefault();
+        if (checkLive) checkLive.style.display = 'block';
+        addLog('Check started', 'warning');
+        const payload = new FormData(checkForm);
+        const r = await fetch('/check/start', { method: 'POST', body: payload });
+        const d = await readApiResult(r, 'Check start failed');
+        checkJobId = d.job_id;
+        setCheckButtons('running');
+        checkTimer = setInterval(async function() {
+          try {
+            const rs = await fetch('/check/status/' + checkJobId);
+            const s = await rs.json();
+            if (!s.ok) throw new Error(s.error || 'status failed');
+            const p = s.progress || {};
+            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
+            if (checkLiveBar) checkLiveBar.style.width = pct + '%';
+            if (checkLivePct) checkLivePct.textContent = pct + '%';
+            if (checkLiveText) checkLiveText.textContent = p.message || 'Checking...';
+            if (checkLiveDetail) checkLiveDetail.textContent = detailFromProgress(p, []);
+            setCheckButtons(s.state || 'running');
+            if (s.state === 'done') {
+              clearInterval(checkTimer);
+              checkTimer = null;
+              addLog('Check finished', 'success');
+              window.location.href = '/check/result/' + checkJobId;
+            }
+            if (s.state === 'error') {
+              clearInterval(checkTimer);
+              checkTimer = null;
+              addLog('Check error: ' + (s.error || 'unknown'), 'error');
+            }
+          } catch (e) {
+            clearInterval(checkTimer);
+            checkTimer = null;
+            addLog('Check status error: ' + e.message, 'error');
+          }
+        }, 1200);
+      });
+    }
+
+    if (checkPauseBtn) checkPauseBtn.addEventListener('click', async function() {
+      if (!checkJobId) return;
+      const r = await fetch('/check/pause/' + checkJobId, { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) { addLog('Check paused', 'warning'); setCheckButtons('paused'); }
+    });
+    if (checkResumeBtn) checkResumeBtn.addEventListener('click', async function() {
+      if (!checkJobId) return;
+      const r = await fetch('/check/resume/' + checkJobId, { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) { addLog('Check resumed', 'info'); setCheckButtons('running'); }
+    });
+    if (checkStopBtn) checkStopBtn.addEventListener('click', async function() {
+      if (!checkJobId) return;
+      const r = await fetch('/check/stop/' + checkJobId, { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) { addLog('Check stopping requested', 'warning'); setCheckButtons('stopping'); }
+    });
+
+    const downloadFormSimple = document.getElementById('download-form-simple');
+    const downloadLive = document.getElementById('download-live');
+    const downloadLiveBar = document.getElementById('download-live-bar');
+    const downloadLivePct = document.getElementById('download-live-percent');
+    const downloadLiveText = document.getElementById('download-live-text');
+    const downloadLiveDetail = document.getElementById('download-live-detail');
+    const downloadPauseBtn = document.getElementById('download-pause-btn');
+    const downloadResumeBtn = document.getElementById('download-resume-btn');
+    const downloadStopBtn = document.getElementById('download-stop-btn');
+    let downloadJobId = '';
+    let downloadTimer = null;
+
+    function setDownloadButtons(state) {
+      const active = !!downloadJobId;
+      if (!downloadPauseBtn || !downloadResumeBtn || !downloadStopBtn) return;
+      downloadPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
+      downloadResumeBtn.disabled = !active || state !== 'paused';
+      downloadStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
+    }
+
+    if (downloadFormSimple) {
+      downloadFormSimple.addEventListener('submit', async function(ev) {
+        ev.preventDefault();
+        addLog('Starting download from analyzed snapshot', 'warning');
+        if (downloadLive) downloadLive.style.display = 'block';
+
+        const payload = new FormData(downloadFormSimple);
+        const res = await fetch('/download/start', { method: 'POST', body: payload });
+        const data = await readApiResult(res, 'Download start failed');
+        downloadJobId = data.job_id;
+        setDownloadButtons('running');
+
+        downloadTimer = setInterval(async function() {
+          try {
+            const sRes = await fetch('/download/status/' + downloadJobId);
+            const s = await sRes.json();
+            if (!s.ok) throw new Error(s.error || 'status failed');
+            const p = s.progress || {};
+            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
+            if (downloadLiveBar) downloadLiveBar.style.width = pct + '%';
+            if (downloadLivePct) downloadLivePct.textContent = pct + '%';
+            if (downloadLiveText) downloadLiveText.textContent = p.message || 'Downloading...';
+            if (downloadLiveDetail) {
+              downloadLiveDetail.textContent = detailFromProgress(p, [
+                `${p.files_downloaded || 0}/${p.max_files || 0} files`,
+                `queue ${p.queue_size || 0}`
+              ]);
+            }
+            setDownloadButtons(s.state || 'running');
+
+            if (s.state === 'done') {
+              clearInterval(downloadTimer);
+              downloadTimer = null;
+              addLog('Download finished', 'success');
+              window.location.reload();
+            }
+            if (s.state === 'error') {
+              clearInterval(downloadTimer);
+              downloadTimer = null;
+              addLog('Download error: ' + (s.error || 'unknown'), 'error');
+            }
+          } catch (e) {
+            clearInterval(downloadTimer);
+            downloadTimer = null;
+            addLog('Download status error: ' + e.message, 'error');
+          }
+        }, 1200);
+      });
+    }
+
+    if (downloadPauseBtn) {
+      downloadPauseBtn.addEventListener('click', async function() {
+        if (!downloadJobId) return;
+        const r = await fetch('/download/pause/' + downloadJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Download paused', 'warning');
+          setDownloadButtons('paused');
+        }
+      });
+    }
+
+    if (downloadResumeBtn) {
+      downloadResumeBtn.addEventListener('click', async function() {
+        if (!downloadJobId) return;
+        const r = await fetch('/download/resume/' + downloadJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Download resumed', 'info');
+          setDownloadButtons('running');
+        }
+      });
+    }
+
+    if (downloadStopBtn) {
+      downloadStopBtn.addEventListener('click', async function() {
+        if (!downloadJobId) return;
+        const r = await fetch('/download/stop/' + downloadJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Download stopping requested', 'warning');
+          setDownloadButtons('stopping');
+        }
+      });
+    }
+
+    const missingForm = document.getElementById('missing-form');
+    const missingLive = document.getElementById('missing-live');
+    const missingLiveBar = document.getElementById('missing-live-bar');
+    const missingLivePct = document.getElementById('missing-live-percent');
+    const missingLiveText = document.getElementById('missing-live-text');
+    const missingLiveDetail = document.getElementById('missing-live-detail');
+    const missingPauseBtn = document.getElementById('missing-pause-btn');
+    const missingResumeBtn = document.getElementById('missing-resume-btn');
+    const missingStopBtn = document.getElementById('missing-stop-btn');
+    let missingJobId = '';
+    let missingTimer = null;
+
+    function setMissingButtons(state) {
+      const active = !!missingJobId;
+      if (!missingPauseBtn || !missingResumeBtn || !missingStopBtn) return;
+      missingPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
+      missingResumeBtn.disabled = !active || state !== 'paused';
+      missingStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
+    }
+
+    if (missingForm) {
+      missingForm.addEventListener('submit', async function(ev) {
+        ev.preventDefault();
+        if (missingLive) missingLive.style.display = 'block';
+        addLog('Missing downloader started', 'warning');
+        const payload = new FormData(missingForm);
+        const r = await fetch('/download-missing/start', { method: 'POST', body: payload });
+        const d = await readApiResult(r, 'Missing start failed');
+        missingJobId = d.job_id;
+        setMissingButtons('running');
+
+        missingTimer = setInterval(async function() {
+          try {
+            const rs = await fetch('/download-missing/status/' + missingJobId);
+            const s = await rs.json();
+            if (!s.ok) throw new Error(s.error || 'status failed');
+            const p = s.progress || {};
+            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
+            if (missingLiveBar) missingLiveBar.style.width = pct + '%';
+            if (missingLivePct) missingLivePct.textContent = pct + '%';
+            if (missingLiveText) missingLiveText.textContent = p.message || 'Downloading missing...';
+            if (missingLiveDetail) missingLiveDetail.textContent = detailFromProgress(p, [
+              `${p.added || 0} added`,
+              `${p.failed || 0} failed`
+            ]);
+            setMissingButtons(s.state || 'running');
+            if (s.state === 'done') {
+              clearInterval(missingTimer);
+              missingTimer = null;
+              addLog('Missing downloader finished', 'success');
+              window.location.reload();
+            }
+            if (s.state === 'error') {
+              clearInterval(missingTimer);
+              missingTimer = null;
+              addLog('Missing downloader error: ' + (s.error || 'unknown'), 'error');
+            }
+          } catch (e) {
+            clearInterval(missingTimer);
+            missingTimer = null;
+            addLog('Missing status error: ' + e.message, 'error');
+          }
+        }, 1200);
+      });
+    }
+
+    if (missingPauseBtn) {
+      missingPauseBtn.addEventListener('click', async function() {
+        if (!missingJobId) return;
+        const r = await fetch('/download-missing/pause/' + missingJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Missing paused', 'warning');
+          setMissingButtons('paused');
+        }
+      });
+    }
+
+    if (missingResumeBtn) {
+      missingResumeBtn.addEventListener('click', async function() {
+        if (!missingJobId) return;
+        const r = await fetch('/download-missing/resume/' + missingJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Missing resumed', 'info');
+          setMissingButtons('running');
+        }
+      });
+    }
+
+    if (missingStopBtn) {
+      missingStopBtn.addEventListener('click', async function() {
+        if (!missingJobId) return;
+        const r = await fetch('/download-missing/stop/' + missingJobId, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          addLog('Missing stopping requested', 'warning');
+          setMissingButtons('stopping');
+        }
+      });
+    }
+
+    // Mark step as completed if we have results
+    {% if inspect %}
+    document.querySelector('[data-step="1"]').classList.add('completed');
+    addLog('Found {{ inspect.total_snapshots }} snapshots', 'success');
+    {% endif %}
+    {% if analysis %}
+    document.querySelector('[data-step="2"]').classList.add('completed');
+    addLog('Analysis ready for snapshot {{ analysis.selected_snapshot }}', 'success');
+    {% endif %}
+    {% if sitemap %}
+    document.querySelector('[data-step="3"]').classList.add('completed');
+    addLog('Sitemap generated', 'success');
+    {% endif %}
+    {% if check %}
+    document.querySelector('[data-step="4"]').classList.add('completed');
+    addLog('Missing check completed', 'success');
+    {% endif %}
+    {% if result %}
+    document.querySelector('[data-step="5"]').classList.add('completed');
+    addLog('Download complete: {{ result.files_downloaded }} files', 'success');
+    {% endif %}
+  </script>
+</body>
+</html>
