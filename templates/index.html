@@ -229,6 +229,7 @@
     .quick-actions {
       display: flex;
       gap: 10px;
+      flex-wrap: wrap;
     }
 
     /* Cards */
@@ -634,6 +635,8 @@
     .action-bar {
       display: flex;
       gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
       margin-top: 20px;
       padding-top: 20px;
       border-top: 1px solid var(--border);
@@ -840,6 +843,16 @@
         flex-direction: row;
         flex-wrap: wrap;
       }
+
+      .workflow-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+      }
+
+      .quick-actions {
+        width: 100%;
+      }
       
       .stats-grid {
         grid-template-columns: repeat(2, 1fr);
@@ -848,8 +861,55 @@
       .detail-grid {
         grid-template-columns: 1fr;
       }
+
+      .preview-frame {
+        height: 340px;
+      }
       
       .log-panel { width: 100%; }
+    }
+
+    @media (max-width: 640px) {
+      .main {
+        padding: 14px 12px;
+      }
+
+      .card {
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .nav {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+      }
+
+      .nav-btn {
+        flex: 0 0 auto;
+      }
+
+      .action-bar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .action-bar form,
+      .action-bar button,
+      .action-bar .btn {
+        width: 100%;
+      }
+
+      .preview-frame {
+        height: 300px;
+      }
     }
   </style>
 </head>
@@ -1089,6 +1149,12 @@
           <span class="cache-badge">Age: {{ inspect._cache.age_seconds }}s</span>
         </div>
         {% endif %}
+        {% if inspect._fallback_notice %}
+        <div class="alert" style="background: rgba(201,162,39,0.12); border:1px solid rgba(201,162,39,0.25); color:#7a6015; margin-top:8px;">
+          <span>⚠️</span>
+          <div>{{ inspect._fallback_notice }}</div>
+        </div>
+        {% endif %}
         {% if inspect.fallback_used %}
         <div class="alert" style="background: rgba(201,162,39,0.12); border:1px solid rgba(201,162,39,0.25); color:#7a6015; margin-top:8px;">
           <span>⚠️</span>
@@ -1242,6 +1308,12 @@
         <div class="cache-note">
           <span class="cache-badge">Source: {{ analysis._cache.source }}</span>
           <span class="cache-badge">Age: {{ analysis._cache.age_seconds }}s</span>
+        </div>
+        {% endif %}
+        {% if analysis._fallback_notice %}
+        <div class="alert" style="background: rgba(201,162,39,0.12); border:1px solid rgba(201,162,39,0.25); color:#7a6015; margin-top:8px;">
+          <span>⚠️</span>
+          <div>{{ analysis._fallback_notice }}</div>
         </div>
         {% endif %}
         <div class="stats-grid">
@@ -1543,1215 +1615,20 @@
   </div>
 
   <script>
-    const CSRF_TOKEN = "{{ csrf_token }}";
-    const _rawFetch = window.fetch.bind(window);
-    window.fetch = async function(input, init) {
-      const opts = init ? { ...init } : {};
-      const method = String((opts.method || 'GET')).toUpperCase();
-      if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
-        const headers = new Headers(opts.headers || {});
-        if (CSRF_TOKEN) headers.set('X-CSRF-Token', CSRF_TOKEN);
-        opts.headers = headers;
-      }
-      const response = await _rawFetch(input, opts);
-      if (response.status === 429) {
-        console.warn('Too many active jobs. Wait for running jobs to finish.');
-      }
-      if (response.status === 403) {
-        try {
-          const payload = await response.clone().json();
-          const message = String((payload || {}).error || '').toLowerCase();
-          if (message.includes('csrf')) {
-            alert('Security token expired. Reloading page...');
-            window.setTimeout(function() { window.location.reload(); }, 700);
-          }
-        } catch (_e) {
-          // ignore non-json 403
-        }
-      }
-      return response;
+    window.WOB_CONTEXT = {
+      csrfToken: {{ csrf_token|tojson }},
+      targetUrl: {{ (target_url or '')|tojson }},
+      hasInspect: {% if inspect %}true{% else %}false{% endif %},
+      hasAnalysis: {% if analysis %}true{% else %}false{% endif %},
+      hasSitemap: {% if sitemap %}true{% else %}false{% endif %},
+      hasCheck: {% if check %}true{% else %}false{% endif %},
+      hasResult: {% if result %}true{% else %}false{% endif %},
+      inspectTotal: {% if inspect %}{{ inspect.total_snapshots }}{% else %}0{% endif %},
+      analysisSnapshot: {{ (analysis.selected_snapshot if analysis else '')|tojson }},
+      resultFiles: {% if result %}{{ result.files_downloaded }}{% else %}0{% endif %}
     };
-
-    function applyScanPreset() {
-      const modeEl = document.getElementById('scan-mode');
-      const mode = (modeEl && modeEl.value) || 'balanced';
-      const displayInput = document.getElementById('display-limit-input');
-      const cdxInput = document.getElementById('cdx-limit-input');
-      if (!displayInput || !cdxInput) return;
-      if (mode === 'quick') {
-        displayInput.value = '10';
-        cdxInput.value = '1500';
-      } else if (mode === 'deep') {
-        displayInput.value = '80';
-        cdxInput.value = '12000';
-      } else {
-        displayInput.value = '30';
-        cdxInput.value = '5000';
-      }
-    }
-
-    function setAdvancedMode(enabled) {
-      const inspectPanel = document.getElementById('inspect-advanced-panel');
-      const analyzePanel = document.getElementById('analyze-advanced-panel');
-      const batchPanel = document.getElementById('batch-advanced-panel');
-      if (inspectPanel) inspectPanel.style.display = enabled ? 'block' : 'none';
-      if (analyzePanel) analyzePanel.style.display = enabled ? 'block' : 'none';
-      if (batchPanel) batchPanel.style.display = enabled ? 'block' : 'none';
-
-      if (!enabled) {
-        const displayInput = document.getElementById('display-limit-input');
-        const cdxInput = document.getElementById('cdx-limit-input');
-        const analyzeDepth = document.getElementById('analyze-depth');
-        const batchCount = document.getElementById('analyze-count-input');
-        const batchCdx = document.getElementById('analyze-cdx-input');
-        if (displayInput) displayInput.value = '10';
-        if (cdxInput) cdxInput.value = '1500';
-        if (analyzeDepth) analyzeDepth.value = '12000';
-        if (batchCount) batchCount.value = '100000';
-        if (batchCdx) batchCdx.value = '12000';
-      } else {
-        applyScanPreset();
-      }
-    }
-
-    // Logging
-    const logContent = document.getElementById('log-content');
-    const logCount = document.getElementById('log-count');
-    let logEntries = 0;
-
-    function addLog(message, type = 'info') {
-      const entry = document.createElement('div');
-      entry.className = `log-entry ${type}`;
-      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-      logContent.appendChild(entry);
-      logContent.scrollTop = logContent.scrollHeight;
-      logEntries++;
-      logCount.textContent = logEntries;
-    }
-
-    function clearLog() {
-      logContent.innerHTML = '';
-      logEntries = 0;
-      logCount.textContent = '0';
-    }
-
-    async function readApiResult(response, fallbackMessage) {
-      let data = null;
-      try {
-        data = await response.json();
-      } catch (_e) {
-        data = { ok: false, error: fallbackMessage || `Request failed (${response.status})` };
-      }
-      if (!response.ok || !data || data.ok === false) {
-        const message = (data && data.error) ? data.error : (fallbackMessage || `Request failed (${response.status})`);
-        if (response.status === 429) {
-          addLog('Too many active jobs. Please wait for running jobs.', 'warning');
-        }
-        throw new Error(message);
-      }
-      return data;
-    }
-
-    function formatElapsedSeconds(sec) {
-      const safe = Math.max(0, Number(sec || 0));
-      const m = Math.floor(safe / 60);
-      const s = Math.floor(safe % 60);
-      if (m <= 0) return `${s}s`;
-      return `${m}m ${s}s`;
-    }
-
-    function detailFromProgress(progress, extras) {
-      const p = progress || {};
-      const stage = p.stage || '-';
-      const elapsed = formatElapsedSeconds(p.elapsed_seconds || 0);
-      const current = p.current_item || '-';
-      const parts = [`stage ${stage}`, `elapsed ${elapsed}`, `item ${current}`];
-      (extras || []).forEach(function(x) {
-        if (x) parts.push(x);
-      });
-      return parts.join(' | ');
-    }
-
-    function applySnapshotToPicker(snapshot) {
-      const sel = document.getElementById('selected-snapshot');
-      if (!sel || !snapshot) return;
-      const hasOption = Array.from(sel.options || []).some(function(opt) { return opt.value === snapshot; });
-      if (!hasOption) return;
-      sel.value = snapshot;
-      sel.dispatchEvent(new Event('change'));
-      addLog('Snapshot selected from local data: ' + snapshot, 'info');
-    }
-
-    function renderProjectSnapshotChips(container, rows) {
-      if (!container) return;
-      container.innerHTML = '';
-      if (!rows || !rows.length) {
-        container.innerHTML = '<div class="status-line">No local snapshot data yet</div>';
-        return;
-      }
-      rows.forEach(function(row) {
-        const ts = row.snapshot || '';
-        if (!ts) return;
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'snap-chip';
-        b.textContent = `${ts} (${row.age_seconds || 0}s)`;
-        b.title = `Use snapshot ${ts}`;
-        b.addEventListener('click', function() {
-          applySnapshotToPicker(ts);
-        });
-        container.appendChild(b);
-      });
-    }
-
-    async function loadProjectDataStatus(url) {
-      const card = document.getElementById('project-data-card');
-      const summary = document.getElementById('project-data-summary');
-      const inspectList = document.getElementById('project-inspect-list');
-      const analyzeList = document.getElementById('project-analyze-list');
-      const sitemapList = document.getElementById('project-sitemap-list');
-      if (!card || !summary || !inspectList || !analyzeList || !sitemapList) return;
-
-      const target = (url || '').trim();
-      if (!target) {
-        card.style.display = 'none';
-        return;
-      }
-
-      try {
-        const res = await fetch('/project/data-status?target_url=' + encodeURIComponent(target));
-        const data = await res.json();
-        if (!data.ok) throw new Error(data.error || 'Could not load project status');
-        const s = data.status || {};
-        const project = s.project || {};
-        const inspect = s.inspect || {};
-        const analyze = s.analyze || { count: 0, snapshots: [] };
-        const sitemap = s.sitemap || { count: 0, snapshots: [] };
-
-        card.style.display = 'block';
-        summary.textContent = `Snapshot searched first: ${inspect.first_found_snapshot || '-'} | latest found: ${inspect.latest_found_snapshot || '-'} | project last snapshot: ${project.last_snapshot || '-'} | cache-first mode active`;
-
-        inspectList.innerHTML = '';
-        const inspectItems = [
-          `has data: ${inspect.has_data ? 'yes' : 'no'}`,
-          `total captures: ${inspect.total_snapshots || 0}`,
-          `ok captures: ${inspect.total_ok_snapshots || 0}`,
-          `latest ok snapshot: ${inspect.latest_ok_snapshot || '-'}`,
-          `last inspect cache age: ${inspect.age_seconds || 0}s`
-        ];
-        inspectItems.forEach(function(t) {
-          const li = document.createElement('li');
-          li.textContent = t;
-          inspectList.appendChild(li);
-        });
-
-        renderProjectSnapshotChips(analyzeList, analyze.snapshots || []);
-        renderProjectSnapshotChips(sitemapList, sitemap.snapshots || []);
-      } catch (e) {
-        addLog('Project data status error: ' + e.message, 'error');
-      }
-    }
-
-    // Global loading animation for non-async steps
-    const stepOverlay = document.getElementById('step-overlay');
-    const stepOverlayTitle = document.getElementById('step-overlay-title');
-    const stepOverlayBar = document.getElementById('step-overlay-bar');
-    const stepOverlayDetail = document.getElementById('step-overlay-detail');
-    const stepOverlayList = document.getElementById('step-overlay-list');
-    let stepOverlayTimer = null;
-
-    function showStepOverlay(title, detail, steps) {
-      if (!stepOverlay) return;
-      stepOverlayTitle.textContent = title || 'Working...';
-      stepOverlayDetail.textContent = detail || 'Please wait...';
-      let idx = 0;
-      let pct = 10;
-
-      stepOverlayList.innerHTML = (steps || [])
-        .map((s, i) => `<li class="${i === 0 ? 'active' : ''}">${s}</li>`)
-        .join('');
-      stepOverlayBar.style.width = pct + '%';
-      stepOverlay.classList.add('show');
-      stepOverlay.setAttribute('aria-hidden', 'false');
-
-      if (stepOverlayTimer) clearInterval(stepOverlayTimer);
-      stepOverlayTimer = setInterval(() => {
-        pct = Math.min(92, pct + 9);
-        stepOverlayBar.style.width = pct + '%';
-        if (stepOverlayList.children.length > 0) {
-          idx = Math.min(idx + 1, stepOverlayList.children.length - 1);
-          [...stepOverlayList.children].forEach((li, i) => li.classList.toggle('active', i === idx));
-        }
-      }, 700);
-    }
-
-    // Auto-generate output folder from URL
-    document.getElementById('target-url').addEventListener('blur', function() {
-      const url = this.value.trim();
-      const outputInput = document.getElementById('output-root');
-      
-      if (url && !outputInput.value) {
-        try {
-          const domain = new URL(url).hostname.replace(/^www\./, '');
-          const date = new Date().toISOString().slice(0,10);
-          outputInput.value = `./output/${domain}_${date}`;
-          addLog(`Auto-set output folder: ${outputInput.value}`);
-        } catch (e) {
-          // Invalid URL, ignore
-        }
-      }
-
-      if (url) {
-        loadProjectDataStatus(url);
-      }
-    });
-
-    const advancedModeToggle = document.getElementById('advanced-mode-toggle');
-    if (advancedModeToggle) {
-      setAdvancedMode(!!advancedModeToggle.checked);
-      advancedModeToggle.addEventListener('change', function() {
-        setAdvancedMode(!!advancedModeToggle.checked);
-      });
-    }
-
-    const scanMode = document.getElementById('scan-mode');
-    if (scanMode) {
-      scanMode.addEventListener('change', function() {
-        applyScanPreset();
-      });
-    }
-
-    const analyzeCountAdvanced = document.getElementById('analyze-count-advanced');
-    const analyzeCdxAdvanced = document.getElementById('analyze-cdx-advanced');
-    const analyzeCountInput = document.getElementById('analyze-count-input');
-    const analyzeCdxInput = document.getElementById('analyze-cdx-input');
-    if (analyzeCountAdvanced && analyzeCountInput) {
-      analyzeCountAdvanced.addEventListener('input', function() {
-        analyzeCountInput.value = analyzeCountAdvanced.value || '100000';
-      });
-    }
-    if (analyzeCdxAdvanced && analyzeCdxInput) {
-      analyzeCdxAdvanced.addEventListener('change', function() {
-        analyzeCdxInput.value = analyzeCdxAdvanced.value || '12000';
-      });
-    }
-
-    document.querySelectorAll('[data-recent-url]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        const url = btn.getAttribute('data-recent-url') || '';
-        const out = btn.getAttribute('data-recent-output') || '';
-        const u = document.getElementById('target-url');
-        const o = document.getElementById('output-root');
-        if (u) u.value = url;
-        if (o && out) o.value = out;
-        addLog('Loaded recent project: ' + url, 'info');
-        loadProjectDataStatus(url);
-      });
-    });
-
-    document.querySelectorAll('[data-delete-project-url]').forEach(function(btn) {
-      btn.addEventListener('click', async function(ev) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const url = btn.getAttribute('data-delete-project-url') || '';
-        if (!url) return;
-        const ok = window.confirm(`Delete recent project and related local cache?\n\n${url}`);
-        if (!ok) return;
-
-        try {
-          const res = await fetch('/recent-projects/delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target_url: url, purge_related: true })
-          });
-          await readApiResult(res, 'Delete failed');
-
-          document.querySelectorAll(`[data-project-row="${CSS.escape(url)}"]`).forEach(function(row) {
-            row.remove();
-          });
-          addLog(`Deleted recent project: ${url}`, 'warning');
-          window.setTimeout(function() {
-            window.location.reload();
-          }, 250);
-        } catch (e) {
-          addLog('Delete failed: ' + e.message, 'error');
-        }
-      });
-    });
-
-    document.querySelectorAll('form').forEach(function(form) {
-      if (CSRF_TOKEN && !form.querySelector('input[name="csrf_token"]')) {
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = 'csrf_token';
-        input.value = CSRF_TOKEN;
-        form.appendChild(input);
-      }
-    });
-
-    const pickFolderBtn = document.getElementById('pick-folder-btn');
-    if (pickFolderBtn) {
-      pickFolderBtn.addEventListener('click', async function() {
-        const outputInput = document.getElementById('output-root');
-        if (!outputInput) return;
-        if (!window.showDirectoryPicker) {
-          addLog('Folder picker is not supported in this browser; type path manually.', 'warning');
-          alert('Folder picker is not supported in this browser. Please type folder path manually.');
-          return;
-        }
-        try {
-          const handle = await window.showDirectoryPicker();
-          outputInput.value = outputInput.value || (`./output/${handle.name}`);
-          addLog(`Folder selected: ${handle.name} (browser security hides full path)`, 'info');
-        } catch (e) {
-          addLog('Folder selection cancelled', 'warning');
-        }
-      });
-    }
-
-    let inspectJobId = '';
-    let inspectTimer = null;
-    const inspectPauseBtn = document.getElementById('inspect-pause-btn');
-    const inspectResumeBtn = document.getElementById('inspect-resume-btn');
-    const inspectStopBtn = document.getElementById('inspect-stop-btn');
-
-    function setInspectButtons(state) {
-      const active = !!inspectJobId;
-      if (!inspectPauseBtn || !inspectResumeBtn || !inspectStopBtn) return;
-      inspectPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
-      inspectResumeBtn.disabled = !active || state !== 'paused';
-      inspectStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
-    }
-
-    // Inspect submission with real progress bar
-    document.getElementById('inspect-form').addEventListener('submit', async function(ev) {
-      ev.preventDefault();
-      const form = ev.currentTarget;
-      if (advancedModeToggle && advancedModeToggle.checked) {
-        applyScanPreset();
-      }
-      const url = document.getElementById('target-url').value;
-      const live = document.getElementById('inspect-live');
-      const bar = document.getElementById('inspect-live-bar');
-      const pct = document.getElementById('inspect-live-percent');
-      const text = document.getElementById('inspect-live-text');
-      const detail = document.getElementById('inspect-live-detail');
-      const status = document.getElementById('status-indicator');
-
-      addLog(`Starting inspection for: ${url}`, 'info');
-      live.style.display = 'block';
-      if (status) {
-        status.className = 'status-pill running';
-        status.textContent = 'Running';
-      }
-
-      try {
-        const startRes = await fetch('/inspect/start', { method: 'POST', body: new FormData(form) });
-        const start = await readApiResult(startRes, 'Could not start inspect job');
-
-        inspectJobId = start.job_id;
-        if (start.cached) {
-          addLog('Inspect loaded from local cache', 'success');
-        }
-        addLog(`Inspect job started: ${inspectJobId}`, 'info');
-        setInspectButtons('running');
-
-        let lastInspectLine = '';
-        inspectTimer = setInterval(async function() {
-          try {
-            const res = await fetch('/inspect/status/' + inspectJobId);
-            const data = await res.json();
-            if (!data.ok) throw new Error(data.error || 'Status error');
-
-            const progress = data.progress || {};
-            const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
-            bar.style.width = percent + '%';
-            pct.textContent = percent + '%';
-            text.textContent = progress.message || 'Checking snapshots...';
-            const cachePart = progress.cache_source ? `cache ${progress.cache_source} (${progress.cache_age_seconds || 0}s)` : '';
-            detail.textContent = detailFromProgress(progress, [
-              `captures ${progress.total_captures || 0}`,
-              cachePart
-            ]);
-            setInspectButtons(data.state || 'running');
-
-            const inspectLine = `inspect ${percent}% | variants ${progress.variants_done || 0}/${progress.variants_total || 0} | captures ${progress.total_captures || 0}`;
-            if (inspectLine !== lastInspectLine) {
-              addLog(inspectLine, 'info');
-              lastInspectLine = inspectLine;
-            }
-
-            if (data.state === 'done') {
-              clearInterval(inspectTimer);
-              inspectTimer = null;
-              addLog('Inspect completed', 'success');
-              if (status) {
-                status.className = 'status-pill success';
-                status.textContent = 'Done';
-              }
-              setInspectButtons('done');
-              window.location.href = '/inspect/result/' + inspectJobId;
-            }
-
-            if (data.state === 'error') {
-              clearInterval(inspectTimer);
-              inspectTimer = null;
-              throw new Error(data.error || 'Inspect failed');
-            }
-          } catch (e) {
-            clearInterval(inspectTimer);
-            inspectTimer = null;
-            addLog('Inspect error: ' + e.message, 'error');
-            if (status) {
-              status.className = 'status-pill error';
-              status.textContent = 'Error';
-            }
-            detail.textContent = e.message;
-            setInspectButtons('error');
-          }
-        }, 900);
-      } catch (e) {
-        addLog('Inspect start failed: ' + e.message, 'error');
-        if (status) {
-          status.className = 'status-pill error';
-          status.textContent = 'Error';
-        }
-        text.textContent = 'Could not start';
-        detail.textContent = e.message;
-        setInspectButtons('error');
-      }
-    });
-
-    // Non-async forms: show loading animation + detailed logs
-    document.querySelectorAll('form').forEach(function(form) {
-      if (form.id === 'inspect-form' || form.id === 'analyze-form' || form.id === 'analyze-batch-form' || form.id === 'sitemap-form' || form.id === 'check-form' || form.id === 'download-form-simple' || form.id === 'missing-form') return;
-      form.addEventListener('submit', function() {
-        const action = form.getAttribute('action') || '';
-        const target = (form.querySelector('[name="target_url"]') || {}).value || '';
-        const snap = (form.querySelector('[name="selected_snapshot"]') || {}).value || '';
-        const limit = (form.querySelector('[name="max_files"]') || form.querySelector('[name="missing_limit"]') || {}).value || '';
-
-        if (action.includes('/analyze')) {
-          addLog(`Analyze start | snapshot: ${snap || 'latest'} | url: ${target}`, 'warning');
-          showStepOverlay(
-            'Analyzing Snapshot',
-            'Collecting structure, file inventory, and platform signals...',
-            ['Read snapshot metadata', 'Scan URLs and folders', 'Detect CMS and signals', 'Build analysis report']
-          );
-        } else if (action.includes('/download-missing')) {
-          addLog(`Missing download start | limit: ${limit || '-'} | snapshot: ${snap || 'latest'}`, 'warning');
-          showStepOverlay(
-            'Downloading Missing Files',
-            'Finding missing assets and trying nearby snapshots...',
-            ['Load manifest', 'Find missing URLs', 'Fetch missing files', 'Update manifest']
-          );
-        } else if (action.includes('/download')) {
-          addLog(`Download start | max files: ${limit || '-'} | snapshot: ${snap || 'latest'}`, 'warning');
-          showStepOverlay(
-            'Building Offline Copy',
-            'Downloading pages/assets and fixing links for offline use...',
-            ['Queue pages and assets', 'Download archive files', 'Repair missing from older snaps', 'Rewrite links and save report']
-          );
-        } else if (action.includes('/check')) {
-          addLog('Check start | comparing downloaded files vs expected', 'warning');
-          showStepOverlay(
-            'Checking Have vs Missing',
-            'Comparing output with archive inventory...',
-            ['Load manifest', 'Build expected inventory', 'Compare have/missing', 'Prepare report']
-          );
-        } else {
-          addLog(`Action start: ${action}`, 'warning');
-          showStepOverlay('Working', 'Running requested operation...', ['Start', 'Process', 'Finalize']);
-        }
-      });
-    });
-
-    if (inspectPauseBtn) {
-      inspectPauseBtn.addEventListener('click', async function() {
-        if (!inspectJobId) return;
-        const r = await fetch('/inspect/pause/' + inspectJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Inspect paused', 'warning');
-          setInspectButtons('paused');
-        } else {
-          addLog('Pause failed: ' + (d.error || 'unknown'), 'error');
-        }
-      });
-    }
-
-    if (inspectResumeBtn) {
-      inspectResumeBtn.addEventListener('click', async function() {
-        if (!inspectJobId) return;
-        const r = await fetch('/inspect/resume/' + inspectJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Inspect resumed', 'info');
-          setInspectButtons('running');
-        } else {
-          addLog('Resume failed: ' + (d.error || 'unknown'), 'error');
-        }
-      });
-    }
-
-    if (inspectStopBtn) {
-      inspectStopBtn.addEventListener('click', async function() {
-        if (!inspectJobId) return;
-        const r = await fetch('/inspect/stop/' + inspectJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Inspect stopping requested', 'warning');
-          setInspectButtons('stopping');
-        } else {
-          addLog('Stop failed: ' + (d.error || 'unknown'), 'error');
-        }
-      });
-    }
-
-    // Initial log
-    addLog('Application loaded. Waiting for URL input.');
-    const initialTargetUrl = (document.getElementById('target-url') || {}).value || '';
-    if (initialTargetUrl.trim()) {
-      loadProjectDataStatus(initialTargetUrl.trim());
-    }
-
-    // Navigation highlighting
-    document.querySelectorAll('.nav-btn').forEach(btn => {
-      btn.addEventListener('click', function() {
-        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-        this.classList.add('active');
-        const tab = this.dataset.goTab;
-        const map = {
-          inspect: 'inspect-results',
-          analyze: 'analyze-results',
-          sitemap: 'sitemap-results',
-          check: 'check-results',
-          download: 'download-results'
-        };
-        const el = document.getElementById(map[tab] || 'inspect-results');
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-    });
-
-    // Snapshot selection preview sync
-    const snapSelect = document.getElementById('selected-snapshot');
-    const previewFrame = document.getElementById('preview-frame');
-    const previewLink = document.getElementById('preview-link');
-    const targetUrlVal = (document.getElementById('target-url') || {}).value || '{{ target_url }}';
-    if (snapSelect && previewFrame && previewLink) {
-      snapSelect.addEventListener('change', function() {
-        const ts = this.value;
-        const url = `https://web.archive.org/web/${ts}/${targetUrlVal}`;
-        previewFrame.src = url;
-        previewLink.href = url;
-        addLog(`Selected snapshot: ${ts}`, 'info');
-      });
-
-      document.querySelectorAll('.snapshot-chip').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-          const ts = btn.getAttribute('data-ts');
-          if (!ts) return;
-          snapSelect.value = ts;
-          snapSelect.dispatchEvent(new Event('change'));
-          document.querySelectorAll('.snapshot-chip').forEach(x => x.classList.remove('active'));
-          btn.classList.add('active');
-        });
-      });
-    }
-
-    const analyzeForm = document.getElementById('analyze-form');
-    const analyzeLive = document.getElementById('analyze-live');
-    const analyzeLiveBar = document.getElementById('analyze-live-bar');
-    const analyzeLivePct = document.getElementById('analyze-live-percent');
-    const analyzeLiveText = document.getElementById('analyze-live-text');
-    const analyzeLiveDetail = document.getElementById('analyze-live-detail');
-    const analyzePauseBtn = document.getElementById('analyze-pause-btn');
-    const analyzeResumeBtn = document.getElementById('analyze-resume-btn');
-    const analyzeStopBtn = document.getElementById('analyze-stop-btn');
-    let analyzeJobId = '';
-    let analyzeTimer = null;
-
-    function setAnalyzeButtons(state) {
-      const active = !!analyzeJobId;
-      if (!analyzePauseBtn || !analyzeResumeBtn || !analyzeStopBtn) return;
-      analyzePauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
-      analyzeResumeBtn.disabled = !active || state !== 'paused';
-      analyzeStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
-    }
-
-    if (analyzeForm) {
-      analyzeForm.addEventListener('submit', async function(ev) {
-        ev.preventDefault();
-        const ts = (snapSelect && snapSelect.value) || '';
-        addLog(`Analyzing snapshot: ${ts}`, 'warning');
-        if (analyzeLive) analyzeLive.style.display = 'block';
-        const payload = new FormData(analyzeForm);
-        const r = await fetch('/analyze/start', { method: 'POST', body: payload });
-        const d = await readApiResult(r, 'Analyze start failed');
-        analyzeJobId = d.job_id;
-        setAnalyzeButtons('running');
-
-        analyzeTimer = setInterval(async function() {
-          try {
-            const rs = await fetch('/analyze/status/' + analyzeJobId);
-            const s = await rs.json();
-            if (!s.ok) throw new Error(s.error || 'status failed');
-            const p = s.progress || {};
-            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
-            if (analyzeLiveBar) analyzeLiveBar.style.width = pct + '%';
-            if (analyzeLivePct) analyzeLivePct.textContent = pct + '%';
-            if (analyzeLiveText) analyzeLiveText.textContent = p.message || 'Analyzing...';
-            if (analyzeLiveDetail) {
-              analyzeLiveDetail.textContent = detailFromProgress(p, [
-                `${p.processed || 0}/${p.total || 0}`
-              ]);
-            }
-            setAnalyzeButtons(s.state || 'running');
-            if (s.state === 'done') {
-              clearInterval(analyzeTimer);
-              analyzeTimer = null;
-              addLog('Analyze finished', 'success');
-              window.location.href = '/analyze/result/' + analyzeJobId;
-            }
-            if (s.state === 'error') {
-              clearInterval(analyzeTimer);
-              analyzeTimer = null;
-              addLog('Analyze error: ' + (s.error || 'unknown'), 'error');
-            }
-          } catch (e) {
-            clearInterval(analyzeTimer);
-            analyzeTimer = null;
-            addLog('Analyze status error: ' + e.message, 'error');
-          }
-        }, 1200);
-      });
-    }
-
-    if (analyzePauseBtn) {
-      analyzePauseBtn.addEventListener('click', async function() {
-        if (!analyzeJobId) return;
-        const r = await fetch('/analyze/pause/' + analyzeJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Analyze paused', 'warning');
-          setAnalyzeButtons('paused');
-        }
-      });
-    }
-    if (analyzeResumeBtn) {
-      analyzeResumeBtn.addEventListener('click', async function() {
-        if (!analyzeJobId) return;
-        const r = await fetch('/analyze/resume/' + analyzeJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Analyze resumed', 'info');
-          setAnalyzeButtons('running');
-        }
-      });
-    }
-    if (analyzeStopBtn) {
-      analyzeStopBtn.addEventListener('click', async function() {
-        if (!analyzeJobId) return;
-        const r = await fetch('/analyze/stop/' + analyzeJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Analyze stopping requested', 'warning');
-          setAnalyzeButtons('stopping');
-        }
-      });
-    }
-
-    const analyzeBatchForm = document.getElementById('analyze-batch-form');
-    const analyzeBatchLive = document.getElementById('analyze-batch-live');
-    const analyzeBatchBar = document.getElementById('analyze-batch-bar');
-    const analyzeBatchPct = document.getElementById('analyze-batch-percent');
-    const analyzeBatchText = document.getElementById('analyze-batch-text');
-    const analyzeBatchDetail = document.getElementById('analyze-batch-detail');
-    const analyzeBatchPauseBtn = document.getElementById('analyze-batch-pause-btn');
-    const analyzeBatchResumeBtn = document.getElementById('analyze-batch-resume-btn');
-    const analyzeBatchStopBtn = document.getElementById('analyze-batch-stop-btn');
-    let analyzeBatchJobId = '';
-    let analyzeBatchTimer = null;
-
-    function setAnalyzeBatchButtons(state) {
-      const active = !!analyzeBatchJobId;
-      if (!analyzeBatchPauseBtn || !analyzeBatchResumeBtn || !analyzeBatchStopBtn) return;
-      analyzeBatchPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
-      analyzeBatchResumeBtn.disabled = !active || state !== 'paused';
-      analyzeBatchStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
-    }
-
-    if (analyzeBatchForm) {
-      analyzeBatchForm.addEventListener('submit', async function(ev) {
-        ev.preventDefault();
-        if (analyzeBatchLive) analyzeBatchLive.style.display = 'block';
-        addLog('Batch analyze started', 'warning');
-        const payload = new FormData(analyzeBatchForm);
-        const r = await fetch('/analyze-batch/start', { method: 'POST', body: payload });
-        const d = await readApiResult(r, 'Batch analyze start failed');
-        analyzeBatchJobId = d.job_id;
-        setAnalyzeBatchButtons('running');
-
-        analyzeBatchTimer = setInterval(async function() {
-          try {
-            const rs = await fetch('/analyze-batch/status/' + analyzeBatchJobId);
-            const s = await rs.json();
-            if (!s.ok) throw new Error(s.error || 'status failed');
-            const p = s.progress || {};
-            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
-            if (analyzeBatchBar) analyzeBatchBar.style.width = pct + '%';
-            if (analyzeBatchPct) analyzeBatchPct.textContent = pct + '%';
-            if (analyzeBatchText) analyzeBatchText.textContent = p.message || 'Batch analyzing...';
-            if (analyzeBatchDetail) {
-              analyzeBatchDetail.textContent = detailFromProgress(p, [
-                `${p.done || 0}/${p.total || 0}`,
-                p.last_site_type || ''
-              ]);
-            }
-            setAnalyzeBatchButtons(s.state || 'running');
-
-            if (s.state === 'done') {
-              clearInterval(analyzeBatchTimer);
-              analyzeBatchTimer = null;
-              addLog('Batch analyze completed', 'success');
-              const snapshots = (((s.result || {}).snapshots) || []);
-              const last = snapshots.length ? snapshots[snapshots.length - 1] : null;
-              const lastSnapshot = (last && last.snapshot) || '';
-              const analyzeFormEl = document.getElementById('analyze-form');
-              const snapSelectEl = document.getElementById('selected-snapshot');
-              if (lastSnapshot && snapSelectEl) {
-                const hasOpt = Array.from(snapSelectEl.options || []).some(function(opt) { return opt.value === lastSnapshot; });
-                if (hasOpt) snapSelectEl.value = lastSnapshot;
-              }
-              if (analyzeFormEl) {
-                addLog('Opening analysis details from saved batch result...', 'info');
-                analyzeFormEl.requestSubmit();
-              }
-            }
-            if (s.state === 'error') {
-              clearInterval(analyzeBatchTimer);
-              analyzeBatchTimer = null;
-              addLog('Batch analyze error: ' + (s.error || 'unknown'), 'error');
-            }
-          } catch (e) {
-            clearInterval(analyzeBatchTimer);
-            analyzeBatchTimer = null;
-            addLog('Batch analyze status error: ' + e.message, 'error');
-          }
-        }, 1200);
-      });
-    }
-
-    if (analyzeBatchPauseBtn) analyzeBatchPauseBtn.addEventListener('click', async function() {
-      if (!analyzeBatchJobId) return;
-      const r = await fetch('/analyze-batch/pause/' + analyzeBatchJobId, { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) { addLog('Batch analyze paused', 'warning'); setAnalyzeBatchButtons('paused'); }
-    });
-    if (analyzeBatchResumeBtn) analyzeBatchResumeBtn.addEventListener('click', async function() {
-      if (!analyzeBatchJobId) return;
-      const r = await fetch('/analyze-batch/resume/' + analyzeBatchJobId, { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) { addLog('Batch analyze resumed', 'info'); setAnalyzeBatchButtons('running'); }
-    });
-    if (analyzeBatchStopBtn) analyzeBatchStopBtn.addEventListener('click', async function() {
-      if (!analyzeBatchJobId) return;
-      const r = await fetch('/analyze-batch/stop/' + analyzeBatchJobId, { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) { addLog('Batch analyze stopping requested', 'warning'); setAnalyzeBatchButtons('stopping'); }
-    });
-
-    const sitemapForm = document.getElementById('sitemap-form');
-    const sitemapLive = document.getElementById('sitemap-live');
-    const sitemapLiveBar = document.getElementById('sitemap-live-bar');
-    const sitemapLivePct = document.getElementById('sitemap-live-percent');
-    const sitemapLiveText = document.getElementById('sitemap-live-text');
-    const sitemapLiveDetail = document.getElementById('sitemap-live-detail');
-    const sitemapPauseBtn = document.getElementById('sitemap-pause-btn');
-    const sitemapResumeBtn = document.getElementById('sitemap-resume-btn');
-    const sitemapStopBtn = document.getElementById('sitemap-stop-btn');
-    let sitemapJobId = '';
-    let sitemapTimer = null;
-
-    function setSitemapButtons(state) {
-      const active = !!sitemapJobId;
-      if (!sitemapPauseBtn || !sitemapResumeBtn || !sitemapStopBtn) return;
-      sitemapPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
-      sitemapResumeBtn.disabled = !active || state !== 'paused';
-      sitemapStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
-    }
-
-    if (sitemapForm) {
-      sitemapForm.addEventListener('submit', async function(ev) {
-        ev.preventDefault();
-        if (sitemapLive) sitemapLive.style.display = 'block';
-        addLog('Sitemap build started', 'warning');
-        const payload = new FormData(sitemapForm);
-        const r = await fetch('/sitemap/start', { method: 'POST', body: payload });
-        const d = await readApiResult(r, 'Sitemap start failed');
-        sitemapJobId = d.job_id;
-        setSitemapButtons('running');
-        sitemapTimer = setInterval(async function() {
-          try {
-            const rs = await fetch('/sitemap/status/' + sitemapJobId);
-            const s = await rs.json();
-            if (!s.ok) throw new Error(s.error || 'status failed');
-            const p = s.progress || {};
-            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
-            if (sitemapLiveBar) sitemapLiveBar.style.width = pct + '%';
-            if (sitemapLivePct) sitemapLivePct.textContent = pct + '%';
-            if (sitemapLiveText) sitemapLiveText.textContent = p.message || 'Building sitemap...';
-            if (sitemapLiveDetail) sitemapLiveDetail.textContent = detailFromProgress(p, [`${p.processed || 0}/${p.total || 0}`]);
-            setSitemapButtons(s.state || 'running');
-            if (s.state === 'done') {
-              clearInterval(sitemapTimer);
-              sitemapTimer = null;
-              addLog('Sitemap build finished', 'success');
-              window.location.href = '/sitemap/result/' + sitemapJobId;
-            }
-            if (s.state === 'error') {
-              clearInterval(sitemapTimer);
-              sitemapTimer = null;
-              addLog('Sitemap error: ' + (s.error || 'unknown'), 'error');
-            }
-          } catch (e) {
-            clearInterval(sitemapTimer);
-            sitemapTimer = null;
-            addLog('Sitemap status error: ' + e.message, 'error');
-          }
-        }, 1200);
-      });
-    }
-
-    if (sitemapPauseBtn) sitemapPauseBtn.addEventListener('click', async function() {
-      if (!sitemapJobId) return;
-      const r = await fetch('/sitemap/pause/' + sitemapJobId, { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) { addLog('Sitemap paused', 'warning'); setSitemapButtons('paused'); }
-    });
-    if (sitemapResumeBtn) sitemapResumeBtn.addEventListener('click', async function() {
-      if (!sitemapJobId) return;
-      const r = await fetch('/sitemap/resume/' + sitemapJobId, { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) { addLog('Sitemap resumed', 'info'); setSitemapButtons('running'); }
-    });
-    if (sitemapStopBtn) sitemapStopBtn.addEventListener('click', async function() {
-      if (!sitemapJobId) return;
-      const r = await fetch('/sitemap/stop/' + sitemapJobId, { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) { addLog('Sitemap stopping requested', 'warning'); setSitemapButtons('stopping'); }
-    });
-
-    const checkForm = document.getElementById('check-form');
-    const checkLive = document.getElementById('check-live');
-    const checkLiveBar = document.getElementById('check-live-bar');
-    const checkLivePct = document.getElementById('check-live-percent');
-    const checkLiveText = document.getElementById('check-live-text');
-    const checkLiveDetail = document.getElementById('check-live-detail');
-    const checkPauseBtn = document.getElementById('check-pause-btn');
-    const checkResumeBtn = document.getElementById('check-resume-btn');
-    const checkStopBtn = document.getElementById('check-stop-btn');
-    let checkJobId = '';
-    let checkTimer = null;
-
-    function setCheckButtons(state) {
-      const active = !!checkJobId;
-      if (!checkPauseBtn || !checkResumeBtn || !checkStopBtn) return;
-      checkPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
-      checkResumeBtn.disabled = !active || state !== 'paused';
-      checkStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
-    }
-
-    if (checkForm) {
-      checkForm.addEventListener('submit', async function(ev) {
-        ev.preventDefault();
-        if (checkLive) checkLive.style.display = 'block';
-        addLog('Check started', 'warning');
-        const payload = new FormData(checkForm);
-        const r = await fetch('/check/start', { method: 'POST', body: payload });
-        const d = await readApiResult(r, 'Check start failed');
-        checkJobId = d.job_id;
-        setCheckButtons('running');
-        checkTimer = setInterval(async function() {
-          try {
-            const rs = await fetch('/check/status/' + checkJobId);
-            const s = await rs.json();
-            if (!s.ok) throw new Error(s.error || 'status failed');
-            const p = s.progress || {};
-            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
-            if (checkLiveBar) checkLiveBar.style.width = pct + '%';
-            if (checkLivePct) checkLivePct.textContent = pct + '%';
-            if (checkLiveText) checkLiveText.textContent = p.message || 'Checking...';
-            if (checkLiveDetail) checkLiveDetail.textContent = detailFromProgress(p, []);
-            setCheckButtons(s.state || 'running');
-            if (s.state === 'done') {
-              clearInterval(checkTimer);
-              checkTimer = null;
-              addLog('Check finished', 'success');
-              window.location.href = '/check/result/' + checkJobId;
-            }
-            if (s.state === 'error') {
-              clearInterval(checkTimer);
-              checkTimer = null;
-              addLog('Check error: ' + (s.error || 'unknown'), 'error');
-            }
-          } catch (e) {
-            clearInterval(checkTimer);
-            checkTimer = null;
-            addLog('Check status error: ' + e.message, 'error');
-          }
-        }, 1200);
-      });
-    }
-
-    if (checkPauseBtn) checkPauseBtn.addEventListener('click', async function() {
-      if (!checkJobId) return;
-      const r = await fetch('/check/pause/' + checkJobId, { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) { addLog('Check paused', 'warning'); setCheckButtons('paused'); }
-    });
-    if (checkResumeBtn) checkResumeBtn.addEventListener('click', async function() {
-      if (!checkJobId) return;
-      const r = await fetch('/check/resume/' + checkJobId, { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) { addLog('Check resumed', 'info'); setCheckButtons('running'); }
-    });
-    if (checkStopBtn) checkStopBtn.addEventListener('click', async function() {
-      if (!checkJobId) return;
-      const r = await fetch('/check/stop/' + checkJobId, { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) { addLog('Check stopping requested', 'warning'); setCheckButtons('stopping'); }
-    });
-
-    const downloadFormSimple = document.getElementById('download-form-simple');
-    const downloadLive = document.getElementById('download-live');
-    const downloadLiveBar = document.getElementById('download-live-bar');
-    const downloadLivePct = document.getElementById('download-live-percent');
-    const downloadLiveText = document.getElementById('download-live-text');
-    const downloadLiveDetail = document.getElementById('download-live-detail');
-    const downloadPauseBtn = document.getElementById('download-pause-btn');
-    const downloadResumeBtn = document.getElementById('download-resume-btn');
-    const downloadStopBtn = document.getElementById('download-stop-btn');
-    let downloadJobId = '';
-    let downloadTimer = null;
-
-    function setDownloadButtons(state) {
-      const active = !!downloadJobId;
-      if (!downloadPauseBtn || !downloadResumeBtn || !downloadStopBtn) return;
-      downloadPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
-      downloadResumeBtn.disabled = !active || state !== 'paused';
-      downloadStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
-    }
-
-    if (downloadFormSimple) {
-      downloadFormSimple.addEventListener('submit', async function(ev) {
-        ev.preventDefault();
-        addLog('Starting download from analyzed snapshot', 'warning');
-        if (downloadLive) downloadLive.style.display = 'block';
-
-        const payload = new FormData(downloadFormSimple);
-        const res = await fetch('/download/start', { method: 'POST', body: payload });
-        const data = await readApiResult(res, 'Download start failed');
-        downloadJobId = data.job_id;
-        setDownloadButtons('running');
-
-        downloadTimer = setInterval(async function() {
-          try {
-            const sRes = await fetch('/download/status/' + downloadJobId);
-            const s = await sRes.json();
-            if (!s.ok) throw new Error(s.error || 'status failed');
-            const p = s.progress || {};
-            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
-            if (downloadLiveBar) downloadLiveBar.style.width = pct + '%';
-            if (downloadLivePct) downloadLivePct.textContent = pct + '%';
-            if (downloadLiveText) downloadLiveText.textContent = p.message || 'Downloading...';
-            if (downloadLiveDetail) {
-              downloadLiveDetail.textContent = detailFromProgress(p, [
-                `${p.files_downloaded || 0}/${p.max_files || 0} files`,
-                `queue ${p.queue_size || 0}`
-              ]);
-            }
-            setDownloadButtons(s.state || 'running');
-
-            if (s.state === 'done') {
-              clearInterval(downloadTimer);
-              downloadTimer = null;
-              addLog('Download finished', 'success');
-              window.location.reload();
-            }
-            if (s.state === 'error') {
-              clearInterval(downloadTimer);
-              downloadTimer = null;
-              addLog('Download error: ' + (s.error || 'unknown'), 'error');
-            }
-          } catch (e) {
-            clearInterval(downloadTimer);
-            downloadTimer = null;
-            addLog('Download status error: ' + e.message, 'error');
-          }
-        }, 1200);
-      });
-    }
-
-    if (downloadPauseBtn) {
-      downloadPauseBtn.addEventListener('click', async function() {
-        if (!downloadJobId) return;
-        const r = await fetch('/download/pause/' + downloadJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Download paused', 'warning');
-          setDownloadButtons('paused');
-        }
-      });
-    }
-
-    if (downloadResumeBtn) {
-      downloadResumeBtn.addEventListener('click', async function() {
-        if (!downloadJobId) return;
-        const r = await fetch('/download/resume/' + downloadJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Download resumed', 'info');
-          setDownloadButtons('running');
-        }
-      });
-    }
-
-    if (downloadStopBtn) {
-      downloadStopBtn.addEventListener('click', async function() {
-        if (!downloadJobId) return;
-        const r = await fetch('/download/stop/' + downloadJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Download stopping requested', 'warning');
-          setDownloadButtons('stopping');
-        }
-      });
-    }
-
-    const missingForm = document.getElementById('missing-form');
-    const missingLive = document.getElementById('missing-live');
-    const missingLiveBar = document.getElementById('missing-live-bar');
-    const missingLivePct = document.getElementById('missing-live-percent');
-    const missingLiveText = document.getElementById('missing-live-text');
-    const missingLiveDetail = document.getElementById('missing-live-detail');
-    const missingPauseBtn = document.getElementById('missing-pause-btn');
-    const missingResumeBtn = document.getElementById('missing-resume-btn');
-    const missingStopBtn = document.getElementById('missing-stop-btn');
-    let missingJobId = '';
-    let missingTimer = null;
-
-    function setMissingButtons(state) {
-      const active = !!missingJobId;
-      if (!missingPauseBtn || !missingResumeBtn || !missingStopBtn) return;
-      missingPauseBtn.disabled = !active || state === 'paused' || state === 'done' || state === 'error';
-      missingResumeBtn.disabled = !active || state !== 'paused';
-      missingStopBtn.disabled = !active || state === 'done' || state === 'error' || state === 'stopping';
-    }
-
-    if (missingForm) {
-      missingForm.addEventListener('submit', async function(ev) {
-        ev.preventDefault();
-        if (missingLive) missingLive.style.display = 'block';
-        addLog('Missing downloader started', 'warning');
-        const payload = new FormData(missingForm);
-        const r = await fetch('/download-missing/start', { method: 'POST', body: payload });
-        const d = await readApiResult(r, 'Missing start failed');
-        missingJobId = d.job_id;
-        setMissingButtons('running');
-
-        missingTimer = setInterval(async function() {
-          try {
-            const rs = await fetch('/download-missing/status/' + missingJobId);
-            const s = await rs.json();
-            if (!s.ok) throw new Error(s.error || 'status failed');
-            const p = s.progress || {};
-            const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
-            if (missingLiveBar) missingLiveBar.style.width = pct + '%';
-            if (missingLivePct) missingLivePct.textContent = pct + '%';
-            if (missingLiveText) missingLiveText.textContent = p.message || 'Downloading missing...';
-            if (missingLiveDetail) missingLiveDetail.textContent = detailFromProgress(p, [
-              `${p.added || 0} added`,
-              `${p.failed || 0} failed`
-            ]);
-            setMissingButtons(s.state || 'running');
-            if (s.state === 'done') {
-              clearInterval(missingTimer);
-              missingTimer = null;
-              addLog('Missing downloader finished', 'success');
-              window.location.reload();
-            }
-            if (s.state === 'error') {
-              clearInterval(missingTimer);
-              missingTimer = null;
-              addLog('Missing downloader error: ' + (s.error || 'unknown'), 'error');
-            }
-          } catch (e) {
-            clearInterval(missingTimer);
-            missingTimer = null;
-            addLog('Missing status error: ' + e.message, 'error');
-          }
-        }, 1200);
-      });
-    }
-
-    if (missingPauseBtn) {
-      missingPauseBtn.addEventListener('click', async function() {
-        if (!missingJobId) return;
-        const r = await fetch('/download-missing/pause/' + missingJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Missing paused', 'warning');
-          setMissingButtons('paused');
-        }
-      });
-    }
-
-    if (missingResumeBtn) {
-      missingResumeBtn.addEventListener('click', async function() {
-        if (!missingJobId) return;
-        const r = await fetch('/download-missing/resume/' + missingJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Missing resumed', 'info');
-          setMissingButtons('running');
-        }
-      });
-    }
-
-    if (missingStopBtn) {
-      missingStopBtn.addEventListener('click', async function() {
-        if (!missingJobId) return;
-        const r = await fetch('/download-missing/stop/' + missingJobId, { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) {
-          addLog('Missing stopping requested', 'warning');
-          setMissingButtons('stopping');
-        }
-      });
-    }
-
-    // Mark step as completed if we have results
-    {% if inspect %}
-    document.querySelector('[data-step="1"]').classList.add('completed');
-    addLog('Found {{ inspect.total_snapshots }} snapshots', 'success');
-    {% endif %}
-    {% if analysis %}
-    document.querySelector('[data-step="2"]').classList.add('completed');
-    addLog('Analysis ready for snapshot {{ analysis.selected_snapshot }}', 'success');
-    {% endif %}
-    {% if sitemap %}
-    document.querySelector('[data-step="3"]').classList.add('completed');
-    addLog('Sitemap generated', 'success');
-    {% endif %}
-    {% if check %}
-    document.querySelector('[data-step="4"]').classList.add('completed');
-    addLog('Missing check completed', 'success');
-    {% endif %}
-    {% if result %}
-    document.querySelector('[data-step="5"]').classList.add('completed');
-    addLog('Download complete: {{ result.files_downloaded }} files', 'success');
-    {% endif %}
   </script>
+  <script src="{{ url_for('static', filename='js/core.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/jobs.js') }}"></script>
 </body>
 </html>

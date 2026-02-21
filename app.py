@@ -8,9 +8,10 @@ import time
 import uuid
 import json
 import secrets
+import shutil
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import urlparse
 
 from flask import Flask, Response, jsonify, render_template, request, session
@@ -116,6 +117,44 @@ def _purge_memory_cache_for_target(target_url: str) -> None:
             ANALYSIS_CACHE.pop(key, None)
 
 
+def _delete_project_output_dirs(target_url: str) -> Dict[str, object]:
+    roots = store.list_project_output_roots(target_url)
+    deleted: List[str] = []
+    skipped: List[str] = []
+    failed: List[str] = []
+
+    for raw in roots:
+        try:
+            candidate = Path(raw).expanduser()
+            path = candidate if candidate.is_absolute() else (BASE_DIR / candidate)
+            resolved = path.resolve()
+        except Exception:
+            failed.append(str(raw))
+            continue
+
+        if not _is_within(OUTPUT_ROOT_DIR, resolved):
+            skipped.append(str(resolved))
+            continue
+
+        if not resolved.exists():
+            continue
+
+        try:
+            if resolved.is_dir():
+                shutil.rmtree(resolved)
+            else:
+                resolved.unlink(missing_ok=True)
+            deleted.append(str(resolved))
+        except Exception:
+            failed.append(str(resolved))
+
+    return {
+        "deleted": deleted,
+        "skipped": skipped,
+        "failed": failed,
+    }
+
+
 def _normalize_target_url(target_url: str) -> str:
     raw = (target_url or "").strip()
     if not raw:
@@ -203,6 +242,54 @@ def _maybe_prune_db() -> None:
     except Exception:
         pass
     _LAST_DB_PRUNE_TS = now
+
+
+def _job_status_response(job_id: str, job_map: dict[str, dict], lock: threading.Lock):
+    with lock:
+        job = job_map.get(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": "Job not found"}), 404
+    return jsonify({"ok": True, **job})
+
+
+def _job_pause_response(job_id: str, job_map: dict[str, dict], lock: threading.Lock):
+    with lock:
+        job = job_map.get(job_id)
+        if not job:
+            return jsonify({"ok": False, "error": "Job not found"}), 404
+        if job.get("state") in ("done", "error"):
+            return jsonify({"ok": False, "error": "Job already finished"}), 400
+        job["paused"] = True
+        job["state"] = "paused"
+    return jsonify({"ok": True})
+
+
+def _job_resume_response(job_id: str, job_map: dict[str, dict], lock: threading.Lock, on_resume=None):
+    with lock:
+        job = job_map.get(job_id)
+        if not job:
+            return jsonify({"ok": False, "error": "Job not found"}), 404
+        if job.get("state") in ("done", "error"):
+            return jsonify({"ok": False, "error": "Job already finished"}), 400
+        job["paused"] = False
+        if job.get("state") == "paused":
+            job["state"] = "running"
+        if callable(on_resume):
+            on_resume(job)
+    return jsonify({"ok": True})
+
+
+def _job_stop_response(job_id: str, job_map: dict[str, dict], lock: threading.Lock):
+    with lock:
+        job = job_map.get(job_id)
+        if not job:
+            return jsonify({"ok": False, "error": "Job not found"}), 404
+        if job.get("state") in ("done", "error"):
+            return jsonify({"ok": False, "error": "Job already finished"}), 400
+        job["cancelled"] = True
+        job["paused"] = False
+        job["state"] = "stopping"
+    return jsonify({"ok": True})
 
 
 @app.before_request
@@ -497,12 +584,25 @@ def delete_recent_project():
     payload = request.get_json(silent=True) or {}
     target_url = str(payload.get("target_url") or request.form.get("target_url") or "").strip()
     purge_related = _parse_bool(str(payload.get("purge_related") or request.form.get("purge_related") or "1"), default=True)
+    delete_output_files = _parse_bool(str(payload.get("delete_output_files") or request.form.get("delete_output_files") or "0"), default=False)
     if not target_url:
         return jsonify({"ok": False, "error": "target_url is required"}), 400
 
+    output_deleted = {"deleted": [], "skipped": [], "failed": []}
+    if delete_output_files:
+        output_deleted = _delete_project_output_dirs(target_url)
+
     removed = store.delete_project(target_url, purge_related=purge_related)
     _purge_memory_cache_for_target(target_url)
-    return jsonify({"ok": True, "target_url": target_url, "removed": removed})
+    return jsonify(
+        {
+            "ok": True,
+            "target_url": target_url,
+            "removed": removed,
+            "delete_output_files": delete_output_files,
+            "output_deleted": output_deleted,
+        }
+    )
 
 
 @app.get("/project/data-status")
@@ -512,6 +612,82 @@ def project_data_status():
         return jsonify({"ok": False, "error": "target_url is required"}), 400
     status = store.get_project_data_status(target_url)
     return jsonify({"ok": True, "status": status})
+
+
+def _synth_inspect_from_analysis(target_url: str, analysis: dict) -> dict:
+    selected = str((analysis or {}).get("selected_snapshot") or "")
+    snapshots = [selected] if selected else []
+    return {
+        "target_url": target_url,
+        "inspected_scope": target_url,
+        "total_snapshots": len(snapshots),
+        "total_ok_snapshots": len(snapshots),
+        "latest_snapshot": selected,
+        "latest_ok_snapshot": selected,
+        "first_snapshot": selected,
+        "snapshots": snapshots,
+        "calendar": {},
+        "variants": [],
+        "display_limit": 10,
+        "cdx_limit": 1500,
+        "limited_mode": True,
+        "fallback_used": False,
+        "_cache": (analysis or {}).get("_cache", {}),
+    }
+
+
+@app.get("/project/open")
+def open_project_cached():
+    target_url = _normalize_target_url(request.args.get("target_url", "").strip())
+    output_root = request.args.get("output_root", str(OUTPUT_ROOT_DIR)).strip() or str(OUTPUT_ROOT_DIR)
+    if not target_url:
+        return render_template(
+            "index.html",
+            result=None,
+            inspect=None,
+            analysis=None,
+            check=None,
+            selected_snapshot=None,
+            target_url="",
+            output_root=output_root,
+            error="target_url is required",
+        )
+
+    inspect = _best_inspect_for_render(target_url)
+    analysis = _best_analyze_for_render(target_url)
+    if inspect is None and analysis is not None:
+        inspect = _synth_inspect_from_analysis(target_url, analysis)
+
+    selected_snapshot = None
+    if analysis:
+        selected_snapshot = analysis.get("selected_snapshot")
+    elif inspect:
+        selected_snapshot = inspect.get("latest_ok_snapshot") or inspect.get("latest_snapshot")
+
+    if inspect is None and analysis is None:
+        return render_template(
+            "index.html",
+            result=None,
+            inspect=None,
+            analysis=None,
+            check=None,
+            selected_snapshot=None,
+            target_url=target_url,
+            output_root=output_root,
+            error="No cached project data found yet. Run inspect first.",
+        )
+
+    return render_template(
+        "index.html",
+        result=None,
+        inspect=inspect,
+        analysis=analysis,
+        check=None,
+        selected_snapshot=selected_snapshot,
+        target_url=target_url,
+        output_root=output_root,
+        error=None,
+    )
 
 
 def _dir_size_bytes(path: Path) -> int:
@@ -750,52 +926,22 @@ def inspect_start():
 
 @app.get("/inspect/status/<job_id>")
 def inspect_status(job_id: str):
-    with INSPECT_JOBS_LOCK:
-        job = INSPECT_JOBS.get(job_id)
-    if not job:
-        return jsonify({"ok": False, "error": "Job not found"}), 404
-    return jsonify({"ok": True, **job})
+    return _job_status_response(job_id, INSPECT_JOBS, INSPECT_JOBS_LOCK)
 
 
 @app.post("/inspect/pause/<job_id>")
 def inspect_pause(job_id: str):
-    with INSPECT_JOBS_LOCK:
-        job = INSPECT_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = True
-        job["state"] = "paused"
-    return jsonify({"ok": True})
+    return _job_pause_response(job_id, INSPECT_JOBS, INSPECT_JOBS_LOCK)
 
 
 @app.post("/inspect/resume/<job_id>")
 def inspect_resume(job_id: str):
-    with INSPECT_JOBS_LOCK:
-        job = INSPECT_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = False
-        if job.get("state") == "paused":
-            job["state"] = "running"
-    return jsonify({"ok": True})
+    return _job_resume_response(job_id, INSPECT_JOBS, INSPECT_JOBS_LOCK)
 
 
 @app.post("/inspect/stop/<job_id>")
 def inspect_stop(job_id: str):
-    with INSPECT_JOBS_LOCK:
-        job = INSPECT_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["cancelled"] = True
-        job["paused"] = False
-        job["state"] = "stopping"
-    return jsonify({"ok": True})
+    return _job_stop_response(job_id, INSPECT_JOBS, INSPECT_JOBS_LOCK)
 
 
 @app.post("/analyze/start")
@@ -816,52 +962,22 @@ def analyze_start():
 
 @app.get("/analyze/status/<job_id>")
 def analyze_status(job_id: str):
-    with ANALYZE_JOBS_LOCK:
-        job = ANALYZE_JOBS.get(job_id)
-    if not job:
-        return jsonify({"ok": False, "error": "Job not found"}), 404
-    return jsonify({"ok": True, **job})
+    return _job_status_response(job_id, ANALYZE_JOBS, ANALYZE_JOBS_LOCK)
 
 
 @app.post("/analyze/pause/<job_id>")
 def analyze_pause(job_id: str):
-    with ANALYZE_JOBS_LOCK:
-        job = ANALYZE_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = True
-        job["state"] = "paused"
-    return jsonify({"ok": True})
+    return _job_pause_response(job_id, ANALYZE_JOBS, ANALYZE_JOBS_LOCK)
 
 
 @app.post("/analyze/resume/<job_id>")
 def analyze_resume(job_id: str):
-    with ANALYZE_JOBS_LOCK:
-        job = ANALYZE_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = False
-        if job.get("state") == "paused":
-            job["state"] = "running"
-    return jsonify({"ok": True})
+    return _job_resume_response(job_id, ANALYZE_JOBS, ANALYZE_JOBS_LOCK)
 
 
 @app.post("/analyze/stop/<job_id>")
 def analyze_stop(job_id: str):
-    with ANALYZE_JOBS_LOCK:
-        job = ANALYZE_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["cancelled"] = True
-        job["paused"] = False
-        job["state"] = "stopping"
-    return jsonify({"ok": True})
+    return _job_stop_response(job_id, ANALYZE_JOBS, ANALYZE_JOBS_LOCK)
 
 
 @app.get("/analyze/result/<job_id>")
@@ -923,52 +1039,22 @@ def analyze_batch_start():
 
 @app.get("/analyze-batch/status/<job_id>")
 def analyze_batch_status(job_id: str):
-    with ANALYZE_BATCH_JOBS_LOCK:
-        job = ANALYZE_BATCH_JOBS.get(job_id)
-    if not job:
-        return jsonify({"ok": False, "error": "Job not found"}), 404
-    return jsonify({"ok": True, **job})
+    return _job_status_response(job_id, ANALYZE_BATCH_JOBS, ANALYZE_BATCH_JOBS_LOCK)
 
 
 @app.post("/analyze-batch/pause/<job_id>")
 def analyze_batch_pause(job_id: str):
-    with ANALYZE_BATCH_JOBS_LOCK:
-        job = ANALYZE_BATCH_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = True
-        job["state"] = "paused"
-    return jsonify({"ok": True})
+    return _job_pause_response(job_id, ANALYZE_BATCH_JOBS, ANALYZE_BATCH_JOBS_LOCK)
 
 
 @app.post("/analyze-batch/resume/<job_id>")
 def analyze_batch_resume(job_id: str):
-    with ANALYZE_BATCH_JOBS_LOCK:
-        job = ANALYZE_BATCH_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = False
-        if job.get("state") == "paused":
-            job["state"] = "running"
-    return jsonify({"ok": True})
+    return _job_resume_response(job_id, ANALYZE_BATCH_JOBS, ANALYZE_BATCH_JOBS_LOCK)
 
 
 @app.post("/analyze-batch/stop/<job_id>")
 def analyze_batch_stop(job_id: str):
-    with ANALYZE_BATCH_JOBS_LOCK:
-        job = ANALYZE_BATCH_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["cancelled"] = True
-        job["paused"] = False
-        job["state"] = "stopping"
-    return jsonify({"ok": True})
+    return _job_stop_response(job_id, ANALYZE_BATCH_JOBS, ANALYZE_BATCH_JOBS_LOCK)
 
 
 @app.post("/check/start")
@@ -987,52 +1073,22 @@ def check_start():
 
 @app.get("/check/status/<job_id>")
 def check_status(job_id: str):
-    with CHECK_JOBS_LOCK:
-        job = CHECK_JOBS.get(job_id)
-    if not job:
-        return jsonify({"ok": False, "error": "Job not found"}), 404
-    return jsonify({"ok": True, **job})
+    return _job_status_response(job_id, CHECK_JOBS, CHECK_JOBS_LOCK)
 
 
 @app.post("/check/pause/<job_id>")
 def check_pause(job_id: str):
-    with CHECK_JOBS_LOCK:
-        job = CHECK_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = True
-        job["state"] = "paused"
-    return jsonify({"ok": True})
+    return _job_pause_response(job_id, CHECK_JOBS, CHECK_JOBS_LOCK)
 
 
 @app.post("/check/resume/<job_id>")
 def check_resume(job_id: str):
-    with CHECK_JOBS_LOCK:
-        job = CHECK_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = False
-        if job.get("state") == "paused":
-            job["state"] = "running"
-    return jsonify({"ok": True})
+    return _job_resume_response(job_id, CHECK_JOBS, CHECK_JOBS_LOCK)
 
 
 @app.post("/check/stop/<job_id>")
 def check_stop(job_id: str):
-    with CHECK_JOBS_LOCK:
-        job = CHECK_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["cancelled"] = True
-        job["paused"] = False
-        job["state"] = "stopping"
-    return jsonify({"ok": True})
+    return _job_stop_response(job_id, CHECK_JOBS, CHECK_JOBS_LOCK)
 
 
 @app.get("/check/result/<job_id>")
@@ -1084,52 +1140,22 @@ def sitemap_start():
 
 @app.get("/sitemap/status/<job_id>")
 def sitemap_status(job_id: str):
-    with SITEMAP_JOBS_LOCK:
-        job = SITEMAP_JOBS.get(job_id)
-    if not job:
-        return jsonify({"ok": False, "error": "Job not found"}), 404
-    return jsonify({"ok": True, **job})
+    return _job_status_response(job_id, SITEMAP_JOBS, SITEMAP_JOBS_LOCK)
 
 
 @app.post("/sitemap/pause/<job_id>")
 def sitemap_pause(job_id: str):
-    with SITEMAP_JOBS_LOCK:
-        job = SITEMAP_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = True
-        job["state"] = "paused"
-    return jsonify({"ok": True})
+    return _job_pause_response(job_id, SITEMAP_JOBS, SITEMAP_JOBS_LOCK)
 
 
 @app.post("/sitemap/resume/<job_id>")
 def sitemap_resume(job_id: str):
-    with SITEMAP_JOBS_LOCK:
-        job = SITEMAP_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = False
-        if job.get("state") == "paused":
-            job["state"] = "running"
-    return jsonify({"ok": True})
+    return _job_resume_response(job_id, SITEMAP_JOBS, SITEMAP_JOBS_LOCK)
 
 
 @app.post("/sitemap/stop/<job_id>")
 def sitemap_stop(job_id: str):
-    with SITEMAP_JOBS_LOCK:
-        job = SITEMAP_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["cancelled"] = True
-        job["paused"] = False
-        job["state"] = "stopping"
-    return jsonify({"ok": True})
+    return _job_stop_response(job_id, SITEMAP_JOBS, SITEMAP_JOBS_LOCK)
 
 
 @app.get("/sitemap/result/<job_id>")
@@ -1734,6 +1760,30 @@ def _start_inspect_job(target_url: str, output_root_input: str, display_limit: i
                     INSPECT_JOBS[job_id]["progress"] = _normalize_progress(done_progress, started_at, stage="done", message="Inspect completed")
                     INSPECT_JOBS[job_id]["result"] = _with_cache_meta(result, "archive", 0)
         except Exception as exc:
+            message = str(exc)
+            lowered = message.lower()
+            if "temporarily unavailable" in lowered or "503" in lowered:
+                cached = _cached_inspect_only(target_url, display_limit, cdx_limit)
+                if cached is not None:
+                    cached = dict(cached)
+                    cached["_fallback_notice"] = "Archive temporarily unavailable (503). Loaded from local inspect cache."
+                    store.add_job_history(
+                        "inspect",
+                        target_url,
+                        "done",
+                        snapshot=cached.get("latest_snapshot"),
+                        summary={"fallback": "cache", "reason": "archive_unavailable"},
+                    )
+                    with INSPECT_JOBS_LOCK:
+                        if job_id in INSPECT_JOBS:
+                            INSPECT_JOBS[job_id]["state"] = "done"
+                            done_progress = dict(INSPECT_JOBS[job_id].get("progress", {}))
+                            done_progress["stage"] = "done"
+                            done_progress["message"] = "Archive unavailable; loaded local cache"
+                            done_progress["percent"] = 100
+                            INSPECT_JOBS[job_id]["progress"] = _normalize_progress(done_progress, started_at, stage="done", message="Archive unavailable; loaded local cache")
+                            INSPECT_JOBS[job_id]["result"] = cached
+                    return
             store.add_job_history("inspect", target_url, "error", summary={"error": str(exc)})
             with INSPECT_JOBS_LOCK:
                 if job_id in INSPECT_JOBS:
@@ -1844,6 +1894,35 @@ def _start_analyze_job(
                     ANALYZE_JOBS[job_id]["progress"] = _normalize_progress(done_progress, started_at, stage="done", message="Analyze completed")
                     ANALYZE_JOBS[job_id]["result"] = _with_cache_meta(analysis, "archive", 0)
         except Exception as exc:
+            message = str(exc)
+            lowered = message.lower()
+            if "temporarily unavailable" in lowered or "503" in lowered:
+                cache_key = f"a|{target_url}|{selected_snapshot}|{cdx_limit}"
+                cached = _cache_get(ANALYSIS_CACHE, cache_key)
+                if cached is None:
+                    row = store.get_analyze_cache_with_meta(cache_key, PERSISTENT_CACHE_MAX_AGE_SECONDS)
+                    if row is not None:
+                        cached = _with_cache_meta(row.get("payload", {}), "sqlite", int(row.get("age_seconds", 0)))
+                if cached is not None:
+                    cached = dict(cached)
+                    cached["_fallback_notice"] = "Archive temporarily unavailable (503). Loaded from local analysis cache."
+                    store.add_job_history(
+                        "analyze",
+                        target_url,
+                        "done",
+                        snapshot=cached.get("selected_snapshot") or selected_snapshot,
+                        summary={"fallback": "cache", "reason": "archive_unavailable"},
+                    )
+                    with ANALYZE_JOBS_LOCK:
+                        if job_id in ANALYZE_JOBS:
+                            ANALYZE_JOBS[job_id]["state"] = "done"
+                            done_progress = dict(ANALYZE_JOBS[job_id].get("progress", {}))
+                            done_progress["stage"] = "done"
+                            done_progress["message"] = "Archive unavailable; loaded local analysis cache"
+                            done_progress["percent"] = 100
+                            ANALYZE_JOBS[job_id]["progress"] = _normalize_progress(done_progress, started_at, stage="done", message="Archive unavailable; loaded local analysis cache")
+                            ANALYZE_JOBS[job_id]["result"] = cached
+                    return
             store.add_job_history("analyze", target_url, "error", snapshot=selected_snapshot or None, summary={"error": str(exc)})
             with ANALYZE_JOBS_LOCK:
                 if job_id in ANALYZE_JOBS:
@@ -2212,25 +2291,12 @@ def download_start():
 
 @app.get("/download/status/<job_id>")
 def download_status(job_id: str):
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
-    if not job:
-        return jsonify({"ok": False, "error": "Job not found"}), 404
-    return jsonify({"ok": True, **job})
+    return _job_status_response(job_id, JOBS, JOBS_LOCK)
 
 
 @app.post("/download/stop/<job_id>")
 def download_stop(job_id: str):
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["cancelled"] = True
-        job["paused"] = False
-        job["state"] = "stopping"
-    return jsonify({"ok": True})
+    return _job_stop_response(job_id, JOBS, JOBS_LOCK)
 
 
 @app.post("/download-missing/start")
@@ -2253,82 +2319,37 @@ def download_missing_start():
 
 @app.get("/download-missing/status/<job_id>")
 def download_missing_status(job_id: str):
-    with MISSING_JOBS_LOCK:
-        job = MISSING_JOBS.get(job_id)
-    if not job:
-        return jsonify({"ok": False, "error": "Job not found"}), 404
-    return jsonify({"ok": True, **job})
+    return _job_status_response(job_id, MISSING_JOBS, MISSING_JOBS_LOCK)
 
 
 @app.post("/download-missing/stop/<job_id>")
 def download_missing_stop(job_id: str):
-    with MISSING_JOBS_LOCK:
-        job = MISSING_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["cancelled"] = True
-        job["paused"] = False
-        job["state"] = "stopping"
-    return jsonify({"ok": True})
+    return _job_stop_response(job_id, MISSING_JOBS, MISSING_JOBS_LOCK)
 
 
 @app.post("/download-missing/pause/<job_id>")
 def download_missing_pause(job_id: str):
-    with MISSING_JOBS_LOCK:
-        job = MISSING_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = True
-        job["state"] = "paused"
-    return jsonify({"ok": True})
+    return _job_pause_response(job_id, MISSING_JOBS, MISSING_JOBS_LOCK)
 
 
 @app.post("/download-missing/resume/<job_id>")
 def download_missing_resume(job_id: str):
-    with MISSING_JOBS_LOCK:
-        job = MISSING_JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = False
-        if job.get("state") == "paused":
-            job["state"] = "running"
-    return jsonify({"ok": True})
+    return _job_resume_response(job_id, MISSING_JOBS, MISSING_JOBS_LOCK)
 
 
 @app.post("/download/pause/<job_id>")
 def download_pause(job_id: str):
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = True
-        job["state"] = "paused"
-    return jsonify({"ok": True})
+    return _job_pause_response(job_id, JOBS, JOBS_LOCK)
 
 
 @app.post("/download/resume/<job_id>")
 def download_resume(job_id: str):
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
-        if not job:
-            return jsonify({"ok": False, "error": "Job not found"}), 404
-        if job.get("state") in ("done", "error"):
-            return jsonify({"ok": False, "error": "Job already finished"}), 400
-        job["paused"] = False
-        if job.get("state") == "paused":
-            job["state"] = "running"
+    def _set_resuming(job: dict) -> None:
         progress = dict(job.get("progress", {}))
         progress["message"] = "Resuming..."
         job["progress"] = progress
-    return jsonify({"ok": True})
+
+    return _job_resume_response(job_id, JOBS, JOBS_LOCK, on_resume=_set_resuming)
 
 
 @app.post("/download")

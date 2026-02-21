@@ -364,6 +364,37 @@ class SQLiteStore:
                 removed["jobs_history"] = _delete_by_target(conn, "jobs_history")
         return removed
 
+    def list_project_output_roots(self, target_url: str) -> List[str]:
+        target_url = self._normalize_target_url(target_url)
+        domain = self._extract_domain(target_url)
+        variants = self._target_url_variants(target_url)
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT COALESCE(last_output_root, '') AS last_output_root
+                FROM projects
+                WHERE domain = ? OR target_url = ?
+                """,
+                (domain, target_url),
+            ).fetchall()
+
+        out: List[str] = []
+        for row in rows:
+            value = str(row["last_output_root"] or "").strip()
+            if value:
+                out.append(value)
+
+        # keep unique order
+        seen: set[str] = set()
+        unique: List[str] = []
+        for value in out:
+            if value in seen:
+                continue
+            seen.add(value)
+            unique.append(value)
+        return unique
+
     def list_recent_jobs(self, limit: int = 12) -> List[Dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(

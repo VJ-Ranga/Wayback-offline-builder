@@ -67,6 +67,21 @@ class AppSmokeTest(unittest.TestCase):
         self.assertTrue(payload.get("ok"))
         self.assertIn("runtime", payload)
 
+    def test_project_open_without_target_url_shows_error_page(self) -> None:
+        response = self.client.get("/project/open")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"target_url is required", response.data)
+
+    def test_delete_recent_project_with_delete_files_flag(self) -> None:
+        response = self.client.post(
+            "/recent-projects/delete",
+            json={"target_url": "https://example.com/nope", "delete_output_files": True},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json() or {}
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("output_deleted", payload)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

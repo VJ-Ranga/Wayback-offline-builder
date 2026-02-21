@@ -67,6 +67,54 @@ class ArchiveWebTool:
         self.session.mount("http://", adapter)
         self.timeout = timeout
         self._cdx_cache: Dict[str, List[str]] = {}
+        self._archive_unavailable_until = 0.0
+
+    def _mark_archive_unavailable(self, hold_seconds: int = 120) -> None:
+        self._archive_unavailable_until = max(self._archive_unavailable_until, time.time() + max(30, hold_seconds))
+
+    def _archive_unavailable_recent(self) -> bool:
+        return time.time() < self._archive_unavailable_until
+
+    def _status_code_from_exception(self, exc: requests.RequestException) -> Optional[int]:
+        response = getattr(exc, "response", None)
+        if response is None:
+            return None
+        try:
+            return int(response.status_code)
+        except Exception:
+            return None
+
+    def _get_with_backoff(
+        self,
+        url: str,
+        *,
+        params: Optional[Dict[str, str]] = None,
+        timeout: Tuple[int, int] = (10, 30),
+        retries: int = 2,
+    ) -> requests.Response:
+        last_exc: Optional[requests.RequestException] = None
+        for attempt in range(max(0, retries) + 1):
+            try:
+                response = self.session.get(url, params=params, timeout=timeout)
+                if int(response.status_code) == 503:
+                    self._mark_archive_unavailable()
+                    if attempt < retries:
+                        time.sleep(0.6 * (2 ** attempt))
+                        continue
+                response.raise_for_status()
+                return response
+            except requests.RequestException as exc:
+                last_exc = exc
+                if self._status_code_from_exception(exc) == 503:
+                    self._mark_archive_unavailable()
+                if attempt < retries:
+                    time.sleep(0.6 * (2 ** attempt))
+                    continue
+                break
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Archive request failed")
 
     def inspect(
         self,
@@ -113,6 +161,10 @@ class ArchiveWebTool:
                 merged["variants"] = merged.get("variants", [])
                 merged["fallback_used"] = True
             else:
+                if self._archive_unavailable_recent():
+                    raise RuntimeError(
+                        "Archive.org is temporarily unavailable (503). Please retry in a few minutes or use cached local data."
+                    )
                 if int(merged.get("failed_variants", 0)) >= int(merged.get("variant_count", 0)):
                     raise RuntimeError("Wayback did not respond in time. Try lower search depth first.")
                 raise RuntimeError("No archived snapshots found for this URL")
@@ -159,6 +211,10 @@ class ArchiveWebTool:
                 snapshots = [fallback_ts]
                 merged["fallback_used"] = True
             else:
+                if self._archive_unavailable_recent():
+                    raise RuntimeError(
+                        "Archive.org is temporarily unavailable (503). Please retry in a few minutes or use cached local data."
+                    )
                 raise RuntimeError("No archived snapshots found for this URL")
 
         chosen = selected_snapshot.strip() if selected_snapshot else snapshots[-1]
@@ -896,12 +952,20 @@ class ArchiveWebTool:
         if success_only:
             params["filter"] = "statuscode:200"
         try:
-            response = self.session.get(CDX_API, params=params, timeout=(8, min(self.timeout, 25)))
-            response.raise_for_status()
+            response = self._get_with_backoff(
+                CDX_API,
+                params=params,
+                timeout=(8, min(self.timeout, 25)),
+                retries=2,
+            )
             rows = response.json()
         except requests.RequestException as exc:
             if not strict:
                 return []
+            if self._status_code_from_exception(exc) == 503 or self._archive_unavailable_recent():
+                raise RuntimeError(
+                    "Archive.org is temporarily unavailable (503). Try again in a few minutes or use local cache."
+                ) from exc
             raise RuntimeError(
                 "Wayback API timed out while listing snapshots. Try again or reduce site scope."
             ) from exc
@@ -948,8 +1012,12 @@ class ArchiveWebTool:
                 "limit": str(per_variant_limit),
             }
             try:
-                response = self.session.get(CDX_API, params=params, timeout=(10, self.timeout))
-                response.raise_for_status()
+                response = self._get_with_backoff(
+                    CDX_API,
+                    params=params,
+                    timeout=(10, self.timeout),
+                    retries=2,
+                )
                 rows = response.json()
             except requests.RequestException:
                 continue
@@ -1100,8 +1168,12 @@ class ArchiveWebTool:
 
     def _fallback_latest_timestamp(self, target_url: str) -> Optional[str]:
         try:
-            res = self.session.get(WAYBACK_AVAILABLE, params={"url": target_url}, timeout=(6, 20))
-            res.raise_for_status()
+            res = self._get_with_backoff(
+                WAYBACK_AVAILABLE,
+                params={"url": target_url},
+                timeout=(6, 20),
+                retries=1,
+            )
             data = res.json()
         except requests.RequestException:
             return None
@@ -1168,8 +1240,12 @@ class ArchiveWebTool:
             "filter": "statuscode:200",
         }
         try:
-            response = self.session.get(CDX_API, params=params, timeout=(10, self.timeout))
-            response.raise_for_status()
+            response = self._get_with_backoff(
+                CDX_API,
+                params=params,
+                timeout=(10, self.timeout),
+                retries=2,
+            )
             rows = response.json()
         except requests.RequestException:
             self._cdx_cache[url] = []
@@ -1189,11 +1265,13 @@ class ArchiveWebTool:
     def _download_at_timestamp(self, url: str, timestamp: str) -> Optional[Tuple[bytes, str, str]]:
         archive_url = WAYBACK_RAW.format(timestamp=timestamp, url=url)
         try:
-            response = self.session.get(archive_url, timeout=(10, self.timeout))
+            response = self._get_with_backoff(
+                archive_url,
+                params=None,
+                timeout=(10, self.timeout),
+                retries=1,
+            )
         except requests.RequestException:
-            return None
-
-        if response.status_code != 200:
             return None
 
         body = response.content
