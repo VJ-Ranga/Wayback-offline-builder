@@ -10,6 +10,20 @@ import urllib.request
 from pathlib import Path
 
 
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def is_healthy(url: str, timeout: float = 2.0) -> bool:
     request = urllib.request.Request(url=url, method="GET")
     try:
@@ -22,9 +36,10 @@ def is_healthy(url: str, timeout: float = 2.0) -> bool:
 
 
 def main() -> int:
+    load_env_file(Path(__file__).resolve().parent / ".env")
     parser = argparse.ArgumentParser(description="Start Flask app in background and wait for health check.")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind/check")
-    parser.add_argument("--port", type=int, default=5000, help="Port to bind/check")
+    parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"), help="Host to bind/check")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "5000")), help="Port to bind/check")
     parser.add_argument("--timeout", type=float, default=25.0, help="Seconds to wait for health")
     parser.add_argument("--check-only", action="store_true", help="Only check current health, do not spawn")
     args = parser.parse_args()

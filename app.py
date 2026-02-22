@@ -23,7 +23,14 @@ from db import SQLiteStore
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
-DB_PATH = BASE_DIR / "archive_cache.sqlite3"
+DB_BACKEND = (os.environ.get("DB_BACKEND") or "sqlite").strip().lower()
+RAW_SQLITE_DB_PATH = (os.environ.get("SQLITE_DB_PATH") or str(BASE_DIR / "archive_cache.sqlite3")).strip()
+sqlite_candidate = Path(RAW_SQLITE_DB_PATH).expanduser()
+DB_PATH = sqlite_candidate if sqlite_candidate.is_absolute() else (BASE_DIR / sqlite_candidate)
+DB_PATH = DB_PATH.resolve()
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+if DB_BACKEND != "sqlite":
+    print(f"[startup] DB_BACKEND='{DB_BACKEND}' is not supported yet; using sqlite at {DB_PATH}")
 OUTPUT_ROOT_DIR = Path(os.environ.get("OUTPUT_ROOT_DIR", str(OUTPUT_DIR))).expanduser().resolve()
 OUTPUT_ROOT_DIR.mkdir(parents=True, exist_ok=True)
 ALLOW_UNSAFE_OUTPUT_ROOT = os.environ.get("ALLOW_UNSAFE_OUTPUT_ROOT", "0").strip().lower() in {"1", "true", "yes", "on"}

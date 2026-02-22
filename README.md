@@ -31,12 +31,19 @@ A local-first Flask app to inspect Wayback snapshots, analyze site structure, ge
 ### Linux / macOS
 
 ```bash
-chmod +x install.sh run.sh
+chmod +x install.sh run.sh uninstall.sh
 ./install.sh
 ./run.sh
 ```
 
 Open: `http://127.0.0.1:5000`
+
+Installer prompts now let you choose:
+- DB preference (`sqlite` or `mysql` config values)
+- SQLite DB file location
+- Output folder location
+
+Note: app runtime currently uses SQLite. If `mysql` is chosen, installer saves mysql values in `.env` for future backend support, and the app continues with SQLite fallback.
 
 ## Tests
 
@@ -52,6 +59,20 @@ python async_smoke_test.py
 - Runtime logs: `runtime/server.log`
 
 Deleting a project from UI removes DB/cache/history for that domain and can optionally delete local output files.
+
+## Uninstall
+
+Windows:
+
+```powershell
+.\uninstall.ps1
+```
+
+Linux / macOS:
+
+```bash
+./uninstall.sh
+```
 
 ## Environment Options
 
