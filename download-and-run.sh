@@ -55,8 +55,17 @@ mv "$src_dir" "$TARGET_DIR"
 echo "[2/3] Project extracted to: $TARGET_DIR"
 cd "$TARGET_DIR"
 
-chmod +x install.sh run.sh uninstall.sh update.sh
+chmod +x install.sh run.sh stop.sh uninstall.sh update.sh
 ./install.sh
 
-echo "[3/3] Starting app..."
-./run.sh
+read -r -p "Start server now? (Y/n): " start_now
+start_now="${start_now:-Y}"
+if [ "${start_now,,}" = "y" ] || [ "${start_now,,}" = "yes" ]; then
+  echo "[3/3] Starting app..."
+  ./run.sh
+  echo "To stop server later: ./stop.sh"
+else
+  echo "Skipped server start."
+  echo "Start with: ./run.sh"
+  echo "Stop with:  ./stop.sh"
+fi

@@ -7,6 +7,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 
@@ -42,6 +43,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "5000")), help="Port to bind/check")
     parser.add_argument("--timeout", type=float, default=25.0, help="Seconds to wait for health")
     parser.add_argument("--check-only", action="store_true", help="Only check current health, do not spawn")
+    parser.add_argument("--open-browser", action="store_true", help="Open app URL in default browser when healthy")
     args = parser.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
@@ -49,6 +51,11 @@ def main() -> int:
 
     if is_healthy(health_url):
         print(f"Already healthy: {health_url}")
+        if args.open_browser:
+            try:
+                webbrowser.open(health_url)
+            except Exception:
+                pass
         return 0
 
     if args.check_only:
@@ -92,6 +99,11 @@ def main() -> int:
             print(f"Server started. URL: {health_url}")
             print(f"PID: {proc.pid}")
             print(f"Log: {log_file}")
+            if args.open_browser:
+                try:
+                    webbrowser.open(health_url)
+                except Exception:
+                    pass
             return 0
         time.sleep(0.4)
 

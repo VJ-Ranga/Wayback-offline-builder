@@ -39,8 +39,17 @@ try {
   Write-Host "[2/3] Project extracted to: $TargetDir" -ForegroundColor Cyan
   & .\install.ps1
 
-  Write-Host "[3/3] Starting app..." -ForegroundColor Cyan
-  & .\run.bat
+  $startNow = Read-Host "Start server now? (Y/n)"
+  if ([string]::IsNullOrWhiteSpace($startNow) -or $startNow.Trim().ToLower() -eq "y" -or $startNow.Trim().ToLower() -eq "yes") {
+    Write-Host "[3/3] Starting app..." -ForegroundColor Cyan
+    & .\run.bat
+    Write-Host "To stop server later: .\stop.ps1" -ForegroundColor Yellow
+  }
+  else {
+    Write-Host "Skipped server start." -ForegroundColor Yellow
+    Write-Host "Start with: .\run.bat"
+    Write-Host "Stop with:  .\stop.ps1"
+  }
 }
 finally {
   if (Test-Path $tmpRoot) {

@@ -93,3 +93,4 @@ fi
 
 echo "[4/4] Install complete."
 echo "Run ./run.sh to start the app."
+echo "Run ./stop.sh to stop the app."

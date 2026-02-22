@@ -90,3 +90,4 @@ if ($dbChoice -eq "mysql") {
 
 Write-Host "[4/4] Install complete." -ForegroundColor Green
 Write-Host "Run .\run.bat to start the app."
+Write-Host "Run .\stop.ps1 to stop the app."

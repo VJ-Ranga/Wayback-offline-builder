@@ -85,27 +85,37 @@ or
 bash <(curl -fsSL https://raw.githubusercontent.com/VJ-Ranga/Wayback-offline-builder/main/download-and-run.sh)
 ```
 
-These download the full project archive, run the installer for your OS, and start the app.
+These download the full project archive, run the installer for your OS, and then ask whether to start the app now.
 
 How downloader scripts work:
 - Download repo archive from GitHub (`main` by default)
 - Extract into a local folder
 - Run installer (`install.ps1` or `install.sh`)
-- Start app (`run.bat` or `run.sh`)
+- Ask whether to start app now
+
+If you choose not to auto-start:
+- Windows: start with `./run.bat`, stop with `./stop.ps1`
+- Linux/macOS: start with `./run.sh`, stop with `./stop.sh`
+
+When started with `run.bat` or `run.sh`, the app tries to open your default browser automatically.
 
 ### Windows (PowerShell)
 
 ```powershell
 .\install.ps1
 .\run.bat
+# Stop later:
+.\stop.ps1
 ```
 
 ### Linux / macOS
 
 ```bash
-chmod +x install.sh run.sh update.sh uninstall.sh
+chmod +x install.sh run.sh stop.sh update.sh uninstall.sh
 ./install.sh
 ./run.sh
+# Stop later:
+./stop.sh
 ```
 
 Open: `http://127.0.0.1:5000`
