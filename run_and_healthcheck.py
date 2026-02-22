@@ -74,7 +74,11 @@ def main() -> int:
 
     creation_flags = 0
     if os.name == "nt":
-        creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        creation_flags = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
 
     with log_file.open("ab") as log_stream:
         proc = subprocess.Popen(
