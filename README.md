@@ -70,7 +70,7 @@ Optional (only if using MySQL backend):
 Windows (PowerShell):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/VJ-Ranga/Wayback-offline-builder/main/download-and-run.ps1 -UseBasicParsing | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/VJ-Ranga/Wayback-offline-builder/main/download-and-run.ps1 | iex"
 ```
 
 Linux / macOS:
