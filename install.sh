@@ -94,6 +94,3 @@ fi
 echo "[4/4] Install complete."
 echo "Run ./run.sh to start the app."
 echo "Run ./stop.sh to stop the app."
-project_path="$(pwd)"
-echo "From any folder, start with: bash \"$project_path/run.sh\""
-echo "From any folder, stop with:  bash \"$project_path/stop.sh\""

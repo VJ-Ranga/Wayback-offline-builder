@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-pid_file="runtime/server.pid"
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+pid_file="$script_dir/runtime/server.pid"
 
 if [ ! -f "$pid_file" ]; then
   echo "No pid file found. Server may already be stopped."

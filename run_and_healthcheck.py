@@ -73,16 +73,19 @@ def main() -> int:
     env["FLASK_DEBUG"] = "0"
 
     creation_flags = 0
+    server_cmd = [sys.executable, "app.py"]
     if os.name == "nt":
+        pythonw = Path(sys.executable).with_name("pythonw.exe")
+        if pythonw.exists():
+            server_cmd = [str(pythonw), "app.py"]
         creation_flags = (
             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "DETACHED_PROCESS", 0)
             | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         )
 
     with log_file.open("ab") as log_stream:
         proc = subprocess.Popen(
-            [sys.executable, "app.py"],
+            server_cmd,
             stdout=log_stream,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,

@@ -1,21 +1,22 @@
 $ErrorActionPreference = "Stop"
 
-$pidFile = "runtime/server.pid"
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$pidFile = Join-Path $scriptRoot "runtime/server.pid"
 if (-not (Test-Path $pidFile)) {
   Write-Host "No pid file found. Server may already be stopped."
   exit 0
 }
 
-$pidRaw = (Get-Content $pidFile -Raw).Trim()
-if ([string]::IsNullOrWhiteSpace($pidRaw)) {
+$pidRawText = (Get-Content $pidFile -Raw).Trim()
+if ([string]::IsNullOrWhiteSpace($pidRawText)) {
   Write-Host "PID file is empty."
   exit 0
 }
 
-$pid = [int]$pidRaw
+$serverPid = [int]$pidRawText
 try {
-  Stop-Process -Id $pid -Force
-  Write-Host "Stopped server PID: $pid"
+  Stop-Process -Id $serverPid -Force
+  Write-Host "Stopped server PID: $serverPid"
 } catch {
-  Write-Host "Could not stop PID $pid (already stopped or no permission)."
+  Write-Host "Could not stop PID $serverPid (already stopped or no permission)."
 }

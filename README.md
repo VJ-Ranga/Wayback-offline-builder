@@ -98,6 +98,7 @@ If you choose not to auto-start:
 - Linux/macOS: start with `./run.sh`, stop with `./stop.sh`
 
 When started with `run.bat` or `run.sh`, the app tries to open your default browser automatically.
+On Windows, server runs in background; you can stop it anytime with `./stop.ps1`.
 
 ### Windows (PowerShell)
 

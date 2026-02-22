@@ -15,8 +15,8 @@ if (-not (Test-Path ".venv")) {
   python -m venv .venv
 }
 
-& .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check --no-python-version-warning -q --upgrade pip
-& .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check --no-python-version-warning -q -r requirements.txt
+& .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check -q --upgrade pip
+& .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check -q -r requirements.txt
 
 function Ask-Value([string]$Prompt, [string]$Default) {
   $value = Read-Host "$Prompt [$Default]"
@@ -91,6 +91,3 @@ if ($dbChoice -eq "mysql") {
 Write-Host "[4/4] Install complete." -ForegroundColor Green
 Write-Host "Run .\run.bat to start the app."
 Write-Host "Run .\stop.ps1 to stop the app."
-$projectPath = (Get-Location).Path
-Write-Host "From any folder, start with: cmd /c `"$projectPath\run.bat`""
-Write-Host "From any folder, stop with:  powershell -ExecutionPolicy Bypass -File `"$projectPath\stop.ps1`""

@@ -35,7 +35,6 @@ try {
 
   Move-Item -Path $srcDir -Destination $TargetDir
   Set-Location $TargetDir
-  $projectPath = (Get-Location).Path
 
   Write-Host "[2/3] Project extracted to: $TargetDir" -ForegroundColor Cyan
   & .\install.ps1
@@ -45,16 +44,13 @@ try {
     Write-Host "[3/3] Starting app..." -ForegroundColor Cyan
     & .\run.bat
     Write-Host "To stop server later (inside project folder): .\stop.ps1" -ForegroundColor Yellow
-    Write-Host "Or from any folder:" -ForegroundColor Yellow
-    Write-Host "powershell -ExecutionPolicy Bypass -File `"$projectPath\stop.ps1`"" -ForegroundColor Yellow
+    Write-Host "If you are in parent folder, use: .\$TargetDir\stop.ps1" -ForegroundColor Yellow
   }
   else {
     Write-Host "Skipped server start." -ForegroundColor Yellow
     Write-Host "Start with: .\run.bat"
     Write-Host "Stop with:  .\stop.ps1"
-    Write-Host "From any folder, use:" -ForegroundColor Yellow
-    Write-Host "cmd /c `"$projectPath\run.bat`""
-    Write-Host "powershell -ExecutionPolicy Bypass -File `"$projectPath\stop.ps1`""
+    Write-Host "From parent folder, use: .\$TargetDir\run.bat and .\$TargetDir\stop.ps1" -ForegroundColor Yellow
   }
 }
 finally {
