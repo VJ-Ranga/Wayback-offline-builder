@@ -24,19 +24,16 @@ A local-first Flask app to inspect Wayback snapshots, analyze site structure, ge
 ### Windows (PowerShell)
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python run_and_healthcheck.py
+.\install.ps1
+.\run.bat
 ```
 
 ### Linux / macOS
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python run_and_healthcheck.py
+chmod +x install.sh run.sh
+./install.sh
+./run.sh
 ```
 
 Open: `http://127.0.0.1:5000`
@@ -54,7 +51,7 @@ python async_smoke_test.py
 - Downloaded files: `output/`
 - Runtime logs: `runtime/server.log`
 
-Deleting a project from UI removes DB/cache/history for that domain, but does not remove output files unless you delete them manually.
+Deleting a project from UI removes DB/cache/history for that domain and can optionally delete local output files.
 
 ## Environment Options
 
@@ -69,3 +66,11 @@ Deleting a project from UI removes DB/cache/history for that domain, but does no
 - `DB_PRUNE_INTERVAL_SECONDS` (default `600`)
 - `DB_CACHE_RETENTION_SECONDS` (default `1209600` / 14 days)
 - `DB_JOBS_RETENTION_SECONDS` (default `2592000` / 30 days)
+
+## Release Checklist
+
+- Run: `python smoke_test.py`
+- Run: `python async_smoke_test.py`
+- Verify setup scripts: `install.ps1`, `install.sh`, `run.bat`, `run.sh`
+- Start app and confirm health: `python run_and_healthcheck.py --check-only`
+- Ensure `archive_cache.sqlite3` is backed up before major upgrades

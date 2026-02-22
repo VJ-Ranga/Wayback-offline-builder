@@ -67,6 +67,25 @@ DB_CACHE_RETENTION_SECONDS = int(os.environ.get("DB_CACHE_RETENTION_SECONDS", st
 DB_JOBS_RETENTION_SECONDS = int(os.environ.get("DB_JOBS_RETENTION_SECONDS", str(30 * 24 * 3600)))
 _LAST_DB_PRUNE_TS = 0.0
 
+DEFAULT_APP_SETTINGS = {
+    "theme_accent": "#8b5e3c",
+    "theme_accent_2": "#6d4a30",
+    "theme_success": "#4a7c59",
+    "theme_bg": "#f8f5f0",
+    "theme_card": "#ffffff",
+    "theme_text": "#2d241c",
+    "theme_muted": "#6b5b4d",
+    "theme_border": "#e0d6c8",
+    "default_output_root": str(OUTPUT_ROOT_DIR),
+    "default_display_limit": 10,
+    "default_inspect_cdx_limit": 1500,
+    "default_analyze_cdx_limit": 12000,
+    "default_max_files": 400,
+    "default_missing_limit": 300,
+}
+_APP_SETTINGS_CACHE: dict = {}
+_APP_SETTINGS_CACHE_TS = 0.0
+
 
 class JobCapacityError(RuntimeError):
     pass
@@ -118,27 +137,14 @@ def _purge_memory_cache_for_target(target_url: str) -> None:
 
 
 def _delete_project_output_dirs(target_url: str) -> Dict[str, object]:
-    roots = store.list_project_output_roots(target_url)
+    plan = _project_output_delete_plan(target_url)
     deleted: List[str] = []
-    skipped: List[str] = []
     failed: List[str] = []
 
-    for raw in roots:
-        try:
-            candidate = Path(raw).expanduser()
-            path = candidate if candidate.is_absolute() else (BASE_DIR / candidate)
-            resolved = path.resolve()
-        except Exception:
-            failed.append(str(raw))
-            continue
-
-        if not _is_within(OUTPUT_ROOT_DIR, resolved):
-            skipped.append(str(resolved))
-            continue
-
+    for path_str in plan.get("deletable", []):
+        resolved = Path(path_str)
         if not resolved.exists():
             continue
-
         try:
             if resolved.is_dir():
                 shutil.rmtree(resolved)
@@ -150,9 +156,44 @@ def _delete_project_output_dirs(target_url: str) -> Dict[str, object]:
 
     return {
         "deleted": deleted,
-        "skipped": skipped,
+        "skipped": list(plan.get("skipped", [])),
         "failed": failed,
     }
+
+
+def _project_output_delete_plan(target_url: str) -> Dict[str, List[str]]:
+    roots = store.list_project_output_roots(target_url)
+    deletable: List[str] = []
+    skipped: List[str] = []
+    invalid: List[str] = []
+
+    for raw in roots:
+        try:
+            candidate = Path(raw).expanduser()
+            path = candidate if candidate.is_absolute() else (BASE_DIR / candidate)
+            resolved = path.resolve()
+        except Exception:
+            invalid.append(str(raw))
+            continue
+
+        if not _is_within(OUTPUT_ROOT_DIR, resolved):
+            skipped.append(str(resolved))
+            continue
+
+        deletable.append(str(resolved))
+
+    # de-dup keep order
+    def _uniq(items: List[str]) -> List[str]:
+        seen: set[str] = set()
+        out: List[str] = []
+        for item in items:
+            if item in seen:
+                continue
+            seen.add(item)
+            out.append(item)
+        return out
+
+    return {"deletable": _uniq(deletable), "skipped": _uniq(skipped), "invalid": _uniq(invalid)}
 
 
 def _normalize_target_url(target_url: str) -> str:
@@ -392,7 +433,7 @@ def _cached_inspect(target_url: str, display_limit: int, cdx_limit: int) -> dict
         if age <= CACHE_TTL_SECONDS:
             return _with_cache_meta(data, "memory", age)
         INSPECT_CACHE.pop(key, None)
-    got_db = store.get_inspect_cache_with_meta(key, CACHE_TTL_SECONDS)
+    got_db = store.get_inspect_cache_with_meta(key, PERSISTENT_CACHE_MAX_AGE_SECONDS)
     if got_db is not None:
         payload = got_db["payload"]
         _cache_set(INSPECT_CACHE, key, payload)
@@ -414,7 +455,7 @@ def _cached_inspect_only(target_url: str, display_limit: int, cdx_limit: int) ->
         if age <= CACHE_TTL_SECONDS:
             return _with_cache_meta(data, "memory", age)
         INSPECT_CACHE.pop(key, None)
-    got_db = store.get_inspect_cache_with_meta(key, CACHE_TTL_SECONDS)
+    got_db = store.get_inspect_cache_with_meta(key, PERSISTENT_CACHE_MAX_AGE_SECONDS)
     if got_db is not None:
         payload = got_db["payload"]
         _cache_set(INSPECT_CACHE, key, payload)
@@ -432,7 +473,7 @@ def _cached_analyze(target_url: str, selected_snapshot: str, cdx_limit: int = 12
         if age <= CACHE_TTL_SECONDS:
             return _with_cache_meta(data, "memory", age)
         ANALYSIS_CACHE.pop(key, None)
-    got_db = store.get_analyze_cache_with_meta(key, CACHE_TTL_SECONDS)
+    got_db = store.get_analyze_cache_with_meta(key, PERSISTENT_CACHE_MAX_AGE_SECONDS)
     if got_db is not None:
         payload = got_db["payload"]
         _cache_set(ANALYSIS_CACHE, key, payload)
@@ -595,11 +636,13 @@ def inject_template_defaults():
         "output_choices": _list_output_choices(current),
         "recent_projects": store.list_recent_projects(limit=8),
         "recent_jobs": store.list_recent_jobs(limit=10),
+        "app_settings": _load_app_settings(),
     }
 
 
 @app.get("/")
 def index():
+    settings = _load_app_settings()
     return render_template(
         "index.html",
         result=None,
@@ -608,9 +651,59 @@ def index():
         check=None,
         selected_snapshot=None,
         target_url="",
-        output_root=str(OUTPUT_ROOT_DIR),
+        output_root=str(settings.get("default_output_root") or OUTPUT_ROOT_DIR),
         error=None,
     )
+
+
+def _safe_hex_color(value: str, fallback: str) -> str:
+    raw = (value or "").strip()
+    if len(raw) == 7 and raw.startswith("#"):
+        try:
+            int(raw[1:], 16)
+            return raw
+        except ValueError:
+            return fallback
+    return fallback
+
+
+@app.get("/settings")
+def settings_page():
+    settings = _load_app_settings()
+    return render_template("settings.html", settings=settings, saved=request.args.get("saved") == "1", error=None)
+
+
+@app.post("/settings")
+def settings_save():
+    current = _load_app_settings()
+    updates = {
+        "theme_accent": _safe_hex_color(request.form.get("theme_accent", ""), current["theme_accent"]),
+        "theme_accent_2": _safe_hex_color(request.form.get("theme_accent_2", ""), current["theme_accent_2"]),
+        "theme_success": _safe_hex_color(request.form.get("theme_success", ""), current["theme_success"]),
+        "theme_bg": _safe_hex_color(request.form.get("theme_bg", ""), current["theme_bg"]),
+        "theme_card": _safe_hex_color(request.form.get("theme_card", ""), current["theme_card"]),
+        "theme_text": _safe_hex_color(request.form.get("theme_text", ""), current["theme_text"]),
+        "theme_muted": _safe_hex_color(request.form.get("theme_muted", ""), current["theme_muted"]),
+        "theme_border": _safe_hex_color(request.form.get("theme_border", ""), current["theme_border"]),
+        "default_output_root": str(request.form.get("default_output_root", str(OUTPUT_ROOT_DIR)).strip() or str(OUTPUT_ROOT_DIR)),
+        "default_display_limit": _parse_int(request.form.get("default_display_limit"), 10, 5, 2000),
+        "default_inspect_cdx_limit": _parse_int(request.form.get("default_inspect_cdx_limit"), 1500, 500, 100000),
+        "default_analyze_cdx_limit": _parse_int(request.form.get("default_analyze_cdx_limit"), 12000, 500, 100000),
+        "default_max_files": _parse_int(request.form.get("default_max_files"), 400, 50, 5000),
+        "default_missing_limit": _parse_int(request.form.get("default_missing_limit"), 300, 1, 5000),
+    }
+    for key, value in updates.items():
+        store.upsert_setting(key, value)
+    _load_app_settings(force=True)
+    return render_template("settings.html", settings=_load_app_settings(), saved=True, error=None)
+
+
+@app.post("/settings/reset")
+def settings_reset():
+    for key, value in DEFAULT_APP_SETTINGS.items():
+        store.upsert_setting(key, value)
+    _load_app_settings(force=True)
+    return render_template("settings.html", settings=_load_app_settings(), saved=True, error=None)
 
 
 @app.post("/recent-projects/delete")
@@ -635,6 +728,23 @@ def delete_recent_project():
             "removed": removed,
             "delete_output_files": delete_output_files,
             "output_deleted": output_deleted,
+        }
+    )
+
+
+@app.get("/recent-projects/delete-preview")
+def delete_recent_project_preview():
+    target_url = _normalize_target_url(request.args.get("target_url", "").strip())
+    if not target_url:
+        return jsonify({"ok": False, "error": "target_url is required"}), 400
+    plan = _project_output_delete_plan(target_url)
+    return jsonify(
+        {
+            "ok": True,
+            "target_url": target_url,
+            "deletable": plan.get("deletable", []),
+            "skipped": plan.get("skipped", []),
+            "invalid": plan.get("invalid", []),
         }
     )
 
@@ -674,6 +784,7 @@ def _synth_inspect_from_analysis(target_url: str, analysis: dict) -> dict:
 def open_project_cached():
     target_url = _normalize_target_url(request.args.get("target_url", "").strip())
     output_root = request.args.get("output_root", str(OUTPUT_ROOT_DIR)).strip() or str(OUTPUT_ROOT_DIR)
+    requested_snapshot = request.args.get("selected_snapshot", "").strip()
     if not target_url:
         return render_template(
             "index.html",
@@ -688,12 +799,16 @@ def open_project_cached():
         )
 
     inspect = _best_inspect_for_render(target_url)
-    analysis = _best_analyze_for_render(target_url)
+    analysis = _best_analyze_for_render(target_url, selected_snapshot=requested_snapshot)
+    if analysis is None:
+        analysis = _best_analyze_for_render(target_url)
     if inspect is None and analysis is not None:
         inspect = _synth_inspect_from_analysis(target_url, analysis)
 
     selected_snapshot = None
-    if analysis:
+    if requested_snapshot:
+        selected_snapshot = requested_snapshot
+    elif analysis:
         selected_snapshot = analysis.get("selected_snapshot")
     elif inspect:
         selected_snapshot = inspect.get("latest_ok_snapshot") or inspect.get("latest_snapshot")
@@ -792,7 +907,8 @@ def diagnostics():
 
 
 def _parse_max_files(value: Optional[str]) -> int:
-    raw = (value or "400").strip()
+    settings = _load_app_settings()
+    raw = (value or str(settings.get("default_max_files", 400))).strip()
     try:
         max_files = int(raw)
     except ValueError:
@@ -801,7 +917,8 @@ def _parse_max_files(value: Optional[str]) -> int:
 
 
 def _parse_missing_limit(value: Optional[str]) -> int:
-    raw = (value or "300").strip()
+    settings = _load_app_settings()
+    raw = (value or str(settings.get("default_missing_limit", 300))).strip()
     try:
         amount = int(raw)
     except ValueError:
@@ -824,6 +941,29 @@ def _parse_int(value: Optional[str], default: int, min_value: int, max_value: in
     return max(min_value, min(num, max_value))
 
 
+def _load_app_settings(force: bool = False) -> dict:
+    global _APP_SETTINGS_CACHE, _APP_SETTINGS_CACHE_TS
+    now = time.time()
+    if not force and _APP_SETTINGS_CACHE and (now - _APP_SETTINGS_CACHE_TS) < 5:
+        return dict(_APP_SETTINGS_CACHE)
+    rows = store.list_settings()
+    settings = dict(DEFAULT_APP_SETTINGS)
+    for key, value in rows.items():
+        if key in settings:
+            settings[key] = value
+    _APP_SETTINGS_CACHE = settings
+    _APP_SETTINGS_CACHE_TS = now
+    return dict(settings)
+
+
+def _get_setting_int(settings: dict, key: str, fallback: int, min_value: int, max_value: int) -> int:
+    try:
+        value = int(settings.get(key, fallback))
+    except Exception:
+        value = fallback
+    return max(min_value, min(value, max_value))
+
+
 def _is_within(parent: Path, child: Path) -> bool:
     try:
         child.resolve().relative_to(parent.resolve())
@@ -844,6 +984,63 @@ def _resolve_output_root(value: Optional[str]) -> Path:
         raise ValueError(f"Output path must be inside {OUTPUT_ROOT_DIR}")
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _manifest_preflight(target_url: str, selected_snapshot: str, output_root_input: str) -> dict:
+    output_root = _resolve_output_root(output_root_input)
+    host = urlparse(target_url).netloc
+    host_slug = tool._safe_name(host)
+    snapshot = selected_snapshot.strip()
+    exact_dir = output_root / f"{host_slug}_{snapshot}" if snapshot else None
+    selected_manifest = (exact_dir / "manifest.json") if exact_dir else None
+
+    host_manifest_paths = sorted(output_root.glob(f"{host_slug}_*/manifest.json"))
+    available_snapshots: list[str] = []
+    for path in host_manifest_paths:
+        folder = path.parent.name
+        prefix = f"{host_slug}_"
+        if folder.startswith(prefix):
+            snap = folder[len(prefix):]
+            if snap:
+                available_snapshots.append(snap)
+
+    found_manifest = None
+    if selected_manifest and selected_manifest.exists():
+        found_manifest = selected_manifest
+    elif (output_root / "manifest.json").exists():
+        found_manifest = output_root / "manifest.json"
+    elif host_manifest_paths:
+        if snapshot:
+            exact_matches = [m for m in host_manifest_paths if m.parent.name == f"{host_slug}_{snapshot}"]
+            if exact_matches:
+                found_manifest = exact_matches[-1]
+        if found_manifest is None:
+            found_manifest = host_manifest_paths[-1]
+
+    if found_manifest is None:
+        if snapshot:
+            guidance = (
+                f"No downloaded offline copy found for snapshot {snapshot}. "
+                "Please click 'Download Offline Copy' first, then run 'Check Have vs Missing'."
+            )
+        else:
+            guidance = "No downloaded offline copy found yet. Please click 'Download Offline Copy' first, then run 'Check Have vs Missing'."
+        return {
+            "manifest_found": False,
+            "message": guidance,
+            "selected_snapshot": snapshot,
+            "available_snapshots": sorted(set(available_snapshots)),
+            "output_root": str(output_root),
+        }
+
+    return {
+        "manifest_found": True,
+        "message": "Ready to check. Downloaded offline copy files were found.",
+        "selected_snapshot": snapshot,
+        "available_snapshots": sorted(set(available_snapshots)),
+        "output_root": str(output_root),
+        "manifest_path": str(found_manifest),
+    }
 
 
 def _build_sitemap_from_analysis(analysis: dict) -> dict:
@@ -917,10 +1114,21 @@ def inspect_target():
 
 @app.post("/inspect/start")
 def inspect_start():
+    settings = _load_app_settings()
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     output_root_input = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
-    display_limit = _parse_int(request.form.get("display_limit"), default=10, min_value=5, max_value=2000)
-    cdx_limit = _parse_int(request.form.get("cdx_limit"), default=1500, min_value=500, max_value=100000)
+    display_limit = _parse_int(
+        request.form.get("display_limit"),
+        default=_get_setting_int(settings, "default_display_limit", 10, 5, 2000),
+        min_value=5,
+        max_value=2000,
+    )
+    cdx_limit = _parse_int(
+        request.form.get("cdx_limit"),
+        default=_get_setting_int(settings, "default_inspect_cdx_limit", 1500, 500, 100000),
+        min_value=500,
+        max_value=100000,
+    )
     force_refresh = _parse_bool(request.form.get("force_refresh"), default=False)
     if not target_url:
         return jsonify({"ok": False, "error": "URL is required"}), 400
@@ -990,13 +1198,51 @@ def inspect_stop(job_id: str):
 
 @app.post("/analyze/start")
 def analyze_start():
+    settings = _load_app_settings()
     target_url = _normalize_target_url(request.form.get("target_url", "").strip())
     selected_snapshot = request.form.get("selected_snapshot", "").strip()
     output_root = request.form.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
     display_limit = _parse_int(request.form.get("display_limit"), default=10, min_value=5, max_value=2000)
-    cdx_limit = _parse_int(request.form.get("cdx_limit"), default=ANALYZE_DEEP_CDX_LIMIT, min_value=500, max_value=100000)
+    cdx_limit = _parse_int(
+        request.form.get("cdx_limit"),
+        default=_get_setting_int(settings, "default_analyze_cdx_limit", ANALYZE_DEEP_CDX_LIMIT, 500, 100000),
+        min_value=500,
+        max_value=100000,
+    )
     if not target_url:
         return jsonify({"ok": False, "error": "URL is required"}), 400
+
+    cached = _best_analyze_for_render(target_url, selected_snapshot=selected_snapshot, cdx_limit=cdx_limit)
+    if cached is not None:
+        job_id = uuid.uuid4().hex
+        started_at = time.time()
+        with ANALYZE_JOBS_LOCK:
+            ANALYZE_JOBS[job_id] = {
+                "state": "done",
+                "paused": False,
+                "cancelled": False,
+                "error": None,
+                "started_at": started_at,
+                "target_url": target_url,
+                "selected_snapshot": selected_snapshot,
+                "output_root": output_root,
+                "display_limit": display_limit,
+                "cdx_limit": cdx_limit,
+                "progress": _normalize_progress(
+                    {
+                        "stage": "done",
+                        "message": "Loaded analysis from local cache",
+                        "percent": 100,
+                        "current_item": selected_snapshot,
+                    },
+                    started_at,
+                    stage="done",
+                    message="Loaded analysis from local cache",
+                ),
+                "result": cached,
+            }
+        return jsonify({"ok": True, "job_id": job_id, "cached": True})
+
     try:
         job_id = _start_analyze_job(target_url, selected_snapshot, output_root, cdx_limit, display_limit)
     except JobCapacityError as exc:
@@ -1109,10 +1355,35 @@ def check_start():
     if not target_url:
         return jsonify({"ok": False, "error": "URL is required"}), 400
     try:
+        preflight = _manifest_preflight(target_url, selected_snapshot, output_root)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    if not preflight.get("manifest_found"):
+        return jsonify({
+            "ok": False,
+            "error": preflight.get("message") or "Manifest not found",
+            "code": "manifest_required",
+            "available_snapshots": preflight.get("available_snapshots", []),
+        }), 400
+    try:
         job_id = _start_check_job(target_url, selected_snapshot, output_root)
     except JobCapacityError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 429
     return jsonify({"ok": True, "job_id": job_id})
+
+
+@app.get("/check/preflight")
+def check_preflight():
+    target_url = _normalize_target_url(request.args.get("target_url", "").strip())
+    selected_snapshot = request.args.get("selected_snapshot", "").strip()
+    output_root = request.args.get("output_root", str(OUTPUT_ROOT_DIR)).strip()
+    if not target_url:
+        return jsonify({"ok": False, "error": "URL is required"}), 400
+    try:
+        details = _manifest_preflight(target_url, selected_snapshot, output_root)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, **details})
 
 
 @app.get("/check/status/<job_id>")

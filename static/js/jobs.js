@@ -123,13 +123,13 @@
         wob.showStepOverlay("Analyzing Snapshot", "Collecting structure, file inventory, and platform signals...", ["Read snapshot metadata", "Scan URLs and folders", "Detect CMS and signals", "Build analysis report"]);
       } else if (action.includes("/download-missing")) {
         addLog(`Missing download start | limit: ${limit || "-"} | snapshot: ${snap || "latest"}`, "warning");
-        wob.showStepOverlay("Downloading Missing Files", "Finding missing assets and trying nearby snapshots...", ["Load manifest", "Find missing URLs", "Fetch missing files", "Update manifest"]);
+        wob.showStepOverlay("Recovering Missing Files", "Finding missing assets and trying nearby snapshots...", ["Load offline index", "Find missing URLs", "Fetch missing files", "Update local report"]);
       } else if (action.includes("/download")) {
         addLog(`Download start | max files: ${limit || "-"} | snapshot: ${snap || "latest"}`, "warning");
         wob.showStepOverlay("Building Offline Copy", "Downloading pages/assets and fixing links for offline use...", ["Queue pages and assets", "Download archive files", "Repair missing from older snaps", "Rewrite links and save report"]);
       } else if (action.includes("/check")) {
         addLog("Check start | comparing downloaded files vs expected", "warning");
-        wob.showStepOverlay("Checking Have vs Missing", "Comparing output with archive inventory...", ["Load manifest", "Build expected inventory", "Compare have/missing", "Prepare report"]);
+        wob.showStepOverlay("Checking Downloaded Files", "Comparing downloaded files with archive inventory...", ["Load offline index", "Build expected inventory", "Compare downloaded/missing", "Prepare report"]);
       }
     });
   });
@@ -196,10 +196,67 @@
   const checkPauseBtn = document.getElementById("check-pause-btn");
   const checkResumeBtn = document.getElementById("check-resume-btn");
   const checkStopBtn = document.getElementById("check-stop-btn");
+  const checkSubmitBtn = checkForm ? checkForm.querySelector('button[type="submit"]') : null;
+  const checkManifestHint = document.getElementById("check-manifest-hint");
   let checkJobId = "";
   let checkTimer = null;
   function setCheckButtons(state) { const active = !!checkJobId; if (!checkPauseBtn || !checkResumeBtn || !checkStopBtn) return; checkPauseBtn.disabled = !active || state === "paused" || state === "done" || state === "error"; checkResumeBtn.disabled = !active || state !== "paused"; checkStopBtn.disabled = !active || state === "done" || state === "error" || state === "stopping"; }
-  if (checkForm) checkForm.addEventListener("submit", async function (ev) { ev.preventDefault(); if (checkLive) checkLive.style.display = "block"; addLog("Check started", "warning"); const d = await readApiResult(await fetch("/check/start", { method: "POST", body: new FormData(checkForm) }), "Check start failed"); checkJobId = d.job_id; setCheckButtons("running"); checkTimer = setInterval(async function () { try { const s = await (await fetch("/check/status/" + checkJobId)).json(); if (!s.ok) throw new Error(s.error || "status failed"); const p = s.progress || {}; const pct = Math.max(0, Math.min(100, Number(p.percent || 0))); if (checkLiveBar) checkLiveBar.style.width = pct + "%"; if (checkLivePct) checkLivePct.textContent = pct + "%"; if (checkLiveText) checkLiveText.textContent = p.message || "Checking..."; if (checkLiveDetail) checkLiveDetail.textContent = detailFromProgress(p, []); setCheckButtons(s.state || "running"); if (s.state === "done") { clearInterval(checkTimer); checkTimer = null; addLog("Check finished", "success"); window.location.href = "/check/result/" + checkJobId; } if (s.state === "error") { clearInterval(checkTimer); checkTimer = null; addLog("Check error: " + (s.error || "unknown"), "error"); } } catch (e) { clearInterval(checkTimer); checkTimer = null; addLog("Check status error: " + e.message, "error"); } }, 1200); });
+  async function checkManifestPreflight(showLogOnMissing) {
+    if (!checkForm) return true;
+    const formData = new FormData(checkForm);
+    const target = String(formData.get("target_url") || "").trim();
+    const selected = String(formData.get("selected_snapshot") || "").trim();
+    const output = String(formData.get("output_root") || "").trim();
+    if (!target) return false;
+
+    try {
+      const params = new URLSearchParams({ target_url: target, selected_snapshot: selected, output_root: output });
+      const res = await fetch("/check/preflight?" + params.toString());
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error((data && data.error) || "Check preflight failed");
+
+      const manifestFound = !!data.manifest_found;
+      if (checkSubmitBtn) checkSubmitBtn.disabled = !manifestFound;
+
+      if (checkManifestHint) {
+        if (manifestFound) {
+          checkManifestHint.textContent = "Check is ready. Downloaded offline copy was found.";
+          checkManifestHint.style.color = "var(--success)";
+        } else {
+          checkManifestHint.textContent = data.message || "Please run Download Offline Copy first, then use Check Have vs Missing.";
+          checkManifestHint.style.color = "var(--warning)";
+        }
+      }
+
+      if (!manifestFound && showLogOnMissing) {
+        addLog((data.message || "Please run Download Offline Copy first, then use Check Have vs Missing."), "warning");
+      }
+      return manifestFound;
+    } catch (e) {
+      if (checkSubmitBtn) checkSubmitBtn.disabled = false;
+      if (checkManifestHint) {
+        checkManifestHint.textContent = "Could not verify check prerequisites. You can still try running check.";
+        checkManifestHint.style.color = "var(--muted)";
+      }
+      if (showLogOnMissing) addLog("Check preflight warning: " + e.message, "warning");
+      return true;
+    }
+  }
+
+  if (checkForm) {
+    checkManifestPreflight(false);
+    checkForm.addEventListener("submit", async function (ev) {
+      ev.preventDefault();
+      const canStart = await checkManifestPreflight(true);
+      if (!canStart) return;
+      if (checkLive) checkLive.style.display = "block";
+      addLog("Check started", "warning");
+      const d = await readApiResult(await fetch("/check/start", { method: "POST", body: new FormData(checkForm) }), "Check start failed");
+      checkJobId = d.job_id;
+      setCheckButtons("running");
+      checkTimer = setInterval(async function () { try { const s = await (await fetch("/check/status/" + checkJobId)).json(); if (!s.ok) throw new Error(s.error || "status failed"); const p = s.progress || {}; const pct = Math.max(0, Math.min(100, Number(p.percent || 0))); if (checkLiveBar) checkLiveBar.style.width = pct + "%"; if (checkLivePct) checkLivePct.textContent = pct + "%"; if (checkLiveText) checkLiveText.textContent = p.message || "Checking..."; if (checkLiveDetail) checkLiveDetail.textContent = detailFromProgress(p, []); setCheckButtons(s.state || "running"); if (s.state === "done") { clearInterval(checkTimer); checkTimer = null; addLog("Check finished", "success"); window.location.href = "/check/result/" + checkJobId; } if (s.state === "error") { clearInterval(checkTimer); checkTimer = null; addLog("Check error: " + (s.error || "unknown"), "error"); } } catch (e) { clearInterval(checkTimer); checkTimer = null; addLog("Check status error: " + e.message, "error"); } }, 1200);
+    });
+  }
   if (checkPauseBtn) checkPauseBtn.addEventListener("click", async function () { if (!checkJobId) return; const d = await (await fetch("/check/pause/" + checkJobId, { method: "POST" })).json(); if (d.ok) { addLog("Check paused", "warning"); setCheckButtons("paused"); } });
   if (checkResumeBtn) checkResumeBtn.addEventListener("click", async function () { if (!checkJobId) return; const d = await (await fetch("/check/resume/" + checkJobId, { method: "POST" })).json(); if (d.ok) { addLog("Check resumed", "info"); setCheckButtons("running"); } });
   if (checkStopBtn) checkStopBtn.addEventListener("click", async function () { if (!checkJobId) return; const d = await (await fetch("/check/stop/" + checkJobId, { method: "POST" })).json(); if (d.ok) { addLog("Check stopping requested", "warning"); setCheckButtons("stopping"); } });
@@ -242,6 +299,6 @@
   if (context.hasInspect) { const el = document.querySelector('[data-step="1"]'); if (el) el.classList.add("completed"); addLog(`Found ${context.inspectTotal || 0} snapshots`, "success"); }
   if (context.hasAnalysis) { const el = document.querySelector('[data-step="2"]'); if (el) el.classList.add("completed"); addLog(`Analysis ready for snapshot ${context.analysisSnapshot || ""}`, "success"); }
   if (context.hasSitemap) { const el = document.querySelector('[data-step="3"]'); if (el) el.classList.add("completed"); addLog("Sitemap generated", "success"); }
-  if (context.hasCheck) { const el = document.querySelector('[data-step="4"]'); if (el) el.classList.add("completed"); addLog("Missing check completed", "success"); }
+  if (context.hasCheck) { const el = document.querySelector('[data-step="4"]'); if (el) el.classList.add("completed"); addLog("Downloaded files check completed", "success"); }
   if (context.hasResult) { const el = document.querySelector('[data-step="5"]'); if (el) el.classList.add("completed"); addLog(`Download complete: ${context.resultFiles || 0} files`, "success"); }
 })();

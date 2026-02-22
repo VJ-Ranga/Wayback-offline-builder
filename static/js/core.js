@@ -113,7 +113,7 @@
     return data;
   }
 
-  function confirmProjectDelete(url) {
+  async function confirmProjectDelete(url) {
     const modal = document.getElementById("confirm-modal");
     const titleEl = document.getElementById("confirm-title");
     const textEl = document.getElementById("confirm-text");
@@ -130,8 +130,26 @@
       return Promise.resolve({ confirmed: true, deleteOutputFiles });
     }
 
+    let preview = { deletable: [], skipped: [], invalid: [] };
+    try {
+      const res = await fetch("/recent-projects/delete-preview?target_url=" + encodeURIComponent(url));
+      const data = await res.json();
+      if (data && data.ok) {
+        preview = {
+          deletable: Array.isArray(data.deletable) ? data.deletable : [],
+          skipped: Array.isArray(data.skipped) ? data.skipped : [],
+          invalid: Array.isArray(data.invalid) ? data.invalid : []
+        };
+      }
+    } catch (_e) {
+      // preview unavailable, continue with generic text
+    }
+
     titleEl.textContent = "Delete Project";
-    textEl.textContent = `Delete project data for:\n${url}`;
+    const line1 = `Delete project data for:\n${url}`;
+    const line2 = `Output folders linked: ${preview.deletable.length}`;
+    const line3 = preview.skipped.length ? `Outside safe output root (will skip): ${preview.skipped.length}` : "";
+    textEl.textContent = [line1, line2, line3].filter(Boolean).join("\n");
     checkWrap.style.display = "inline-flex";
     checkEl.checked = false;
     checkLabel.textContent = "Also delete local output folder files";
@@ -195,6 +213,107 @@
     sel.value = snapshot;
     sel.dispatchEvent(new Event("change"));
     addLog("Snapshot selected from local data: " + snapshot, "info");
+  }
+
+  function setFlowHint(el, text, warn) {
+    if (!el) return;
+    el.textContent = text;
+    if (warn) el.classList.add("warn");
+    else el.classList.remove("warn");
+  }
+
+  function applyFlowGuidance() {
+    const hasInspect = !!context.hasInspect;
+    const hasAnalysis = !!context.hasAnalysis;
+    const hasCheck = !!context.hasCheck;
+    const hasResult = !!context.hasResult;
+    const checkMissing = Number(context.checkMissing || 0);
+
+    const analyzeSubmitBtn = document.getElementById("analyze-submit-btn");
+    const batchSubmitBtn = document.getElementById("batch-submit-btn");
+    const downloadSubmitBtn = document.getElementById("download-submit-btn");
+    const sitemapSubmitBtn = document.getElementById("sitemap-submit-btn");
+    const checkSubmitBtn = document.getElementById("check-submit-btn");
+    const missingSubmitBtn = document.getElementById("missing-submit-btn");
+
+    const analyzeHint = document.getElementById("analyze-flow-hint");
+    const downloadHint = document.getElementById("download-flow-hint");
+    const checkHint = document.getElementById("check-manifest-hint");
+    const missingHint = document.getElementById("missing-flow-hint");
+
+    if (analyzeSubmitBtn) analyzeSubmitBtn.disabled = !hasInspect;
+    if (batchSubmitBtn) batchSubmitBtn.disabled = !hasInspect;
+    if (!hasInspect) {
+      setFlowHint(analyzeHint, "Locked: run Step 1 (Find Snapshots) first.", true);
+    } else {
+      setFlowHint(analyzeHint, "Pick a snapshot, then run analysis.", false);
+    }
+
+    if (downloadSubmitBtn) downloadSubmitBtn.disabled = !hasAnalysis;
+    if (sitemapSubmitBtn) sitemapSubmitBtn.disabled = !hasAnalysis;
+    if (checkSubmitBtn) checkSubmitBtn.disabled = !hasAnalysis;
+    if (!hasAnalysis) {
+      setFlowHint(downloadHint, "Locked: run Step 2 (Analyze Snapshot) first.", true);
+      if (checkHint) {
+        checkHint.textContent = "Locked: run Step 2 (Analyze Snapshot), then Step 3 (Download Offline Copy).";
+        checkHint.style.color = "#9a6f12";
+      }
+    } else {
+      setFlowHint(downloadHint, "Run download to build your local offline copy.", false);
+    }
+
+    if (missingSubmitBtn) missingSubmitBtn.disabled = !hasCheck;
+    if (!hasCheck) {
+      setFlowHint(missingHint, "Locked: run Check Downloaded Files first.", true);
+    } else if (checkMissing <= 0) {
+      setFlowHint(missingHint, "No missing files detected in this check.", false);
+    } else {
+      setFlowHint(missingHint, "Use this to recover files still missing after download.", false);
+    }
+
+    const continueCard = document.getElementById("continue-card");
+    const continueTitle = document.getElementById("continue-title");
+    const continueText = document.getElementById("continue-text");
+    const continueBtn = document.getElementById("continue-action-btn");
+    if (!continueCard || !continueTitle || !continueText || !continueBtn) return;
+
+    let label = "Open Next Step";
+    let detail = "";
+    let targetId = "inspect-form";
+
+    if (!hasInspect) {
+      detail = "Start by entering a URL and clicking Find Snapshots.";
+      label = "Go to Step 1";
+      targetId = "inspect-form";
+    } else if (!hasAnalysis) {
+      detail = "You already have snapshots. Choose one and run Analyze Selected Snapshot.";
+      label = "Go to Step 2";
+      targetId = "analyze-form";
+    } else if (!hasResult) {
+      detail = "Analysis is ready. Next, build your offline copy using Download Offline Copy.";
+      label = "Go to Step 3";
+      targetId = "download-form-simple";
+    } else if (!hasCheck) {
+      detail = "Offline copy exists. Next, run Check Downloaded Files to verify coverage.";
+      label = "Go to Step 4";
+      targetId = "check-form";
+    } else if (checkMissing > 0) {
+      detail = `Check found ${checkMissing} missing file(s). Run Recover Missing Files next.`;
+      label = "Recover Missing Files";
+      targetId = "missing-form";
+    } else {
+      detail = "Great progress. Your latest check shows no missing files.";
+      label = "View Check Results";
+      targetId = "check-results";
+    }
+
+    continueText.textContent = detail;
+    continueBtn.textContent = label;
+    continueCard.style.display = "block";
+    continueBtn.onclick = function () {
+      const el = document.getElementById(targetId);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
   }
 
   function renderProjectSnapshotChips(container, rows) {
@@ -432,6 +551,7 @@
   if (initialTargetUrl.trim()) {
     loadProjectDataStatus(initialTargetUrl.trim());
   }
+  applyFlowGuidance();
 
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.addEventListener("click", function () {
@@ -453,6 +573,7 @@
   const snapSelect = document.getElementById("selected-snapshot");
   const previewFrame = document.getElementById("preview-frame");
   const previewLink = document.getElementById("preview-link");
+  const openCachedSnapshotBtn = document.getElementById("open-cached-snapshot-btn");
   const targetUrlVal = (document.getElementById("target-url") || {}).value || context.targetUrl || "";
   if (snapSelect && previewFrame && previewLink) {
     snapSelect.addEventListener("change", function () {
@@ -472,6 +593,28 @@
         document.querySelectorAll(".snapshot-chip").forEach((x) => x.classList.remove("active"));
         btn.classList.add("active");
       });
+    });
+  }
+
+  if (openCachedSnapshotBtn) {
+    openCachedSnapshotBtn.addEventListener("click", function () {
+      const targetInput = document.getElementById("target-url");
+      const outputInput = document.getElementById("output-root");
+      const selected = (snapSelect && snapSelect.value) || "";
+      const target = (targetInput && targetInput.value) || targetUrlVal || "";
+      const output = (outputInput && outputInput.value) || "";
+      if (!target) {
+        addLog("Please select a project URL first", "warning");
+        return;
+      }
+      const openUrl =
+        "/project/open?target_url=" +
+        encodeURIComponent(target) +
+        "&output_root=" +
+        encodeURIComponent(output) +
+        "&selected_snapshot=" +
+        encodeURIComponent(selected);
+      window.location.href = openUrl;
     });
   }
 

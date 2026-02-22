@@ -132,7 +132,11 @@ class AsyncRoutesSmokeTest(unittest.TestCase):
             web_app.tool, "analyze", side_effect=self._fake_analyze
         ), patch.object(web_app.tool, "audit", side_effect=self._fake_audit), patch.object(
             web_app.tool, "download_missing", side_effect=self._fake_download_missing
-        ), patch.object(web_app.tool, "run", side_effect=self._fake_run):
+        ), patch.object(web_app.tool, "run", side_effect=self._fake_run), patch.object(
+            web_app,
+            "_manifest_preflight",
+            return_value={"manifest_found": True, "message": "ok", "available_snapshots": ["20240101120000"]},
+        ):
             inspect_start = self.client.post(
                 "/inspect/start",
                 data={"target_url": self.target_url, "display_limit": "10", "cdx_limit": "1500", "force_refresh": "1"},

@@ -6,17 +6,17 @@
   <title>Archive Web Offline Tool</title>
   <style>
     :root {
-      --bg: #f8f5f0;
-      --panel: #fffdf9;
-      --card: #fffdf9;
-      --text: #1a1512;
-      --muted: #6b5e51;
-      --accent: #8b5a3a;
-      --accent-2: #6b4423;
-      --success: #4a7c59;
+      --bg: {{ app_settings.theme_bg }};
+      --panel: {{ app_settings.theme_card }};
+      --card: {{ app_settings.theme_card }};
+      --text: {{ app_settings.theme_text }};
+      --muted: {{ app_settings.theme_muted }};
+      --accent: {{ app_settings.theme_accent }};
+      --accent-2: {{ app_settings.theme_accent_2 }};
+      --success: {{ app_settings.theme_success }};
       --warning: #c9a227;
       --error: #b54242;
-      --border: #e0d5c8;
+      --border: {{ app_settings.theme_border }};
       --shadow: 0 4px 20px rgba(0,0,0,0.08);
       --radius: 14px;
       --radius-sm: 8px;
@@ -309,19 +309,37 @@
     .btn {
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       gap: 8px;
       padding: 10px 18px;
+      min-height: 40px;
       border: none;
       border-radius: var(--radius-sm);
       font-size: 14px;
       font-weight: 500;
+      line-height: 1.1;
       cursor: pointer;
       transition: all 0.15s;
+      text-decoration: none;
+    }
+
+    a.btn,
+    a.btn:visited,
+    a.btn:hover,
+    a.btn:active {
+      text-decoration: none;
     }
 
     .btn-primary {
       background: var(--accent);
       color: white;
+    }
+
+    a.btn-primary,
+    a.btn-primary:visited,
+    a.btn-primary:hover,
+    a.btn-primary:active {
+      color: #fff;
     }
 
     .btn-primary:hover {
@@ -330,6 +348,13 @@
 
     .btn-secondary {
       background: var(--border);
+      color: var(--text);
+    }
+
+    a.btn-secondary,
+    a.btn-secondary:visited,
+    a.btn-secondary:hover,
+    a.btn-secondary:active {
       color: var(--text);
     }
 
@@ -342,13 +367,70 @@
       color: white;
     }
 
+    a.btn-success,
+    a.btn-success:visited,
+    a.btn-success:hover,
+    a.btn-success:active {
+      color: #fff;
+    }
+
     .btn-success:hover {
       background: #3a6648;
+    }
+
+    .btn-quiet {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+    }
+
+    .btn-quiet:hover {
+      background: #f5f1ec;
+      border-color: #cfc2b2;
     }
 
     .btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
+    }
+
+    .flow-hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .flow-hint.warn {
+      color: #9a6f12;
+    }
+
+    .continue-card {
+      display: none;
+      margin-bottom: 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #fff;
+      padding: 14px;
+    }
+
+    .continue-title {
+      margin: 0 0 4px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .continue-text {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .continue-actions {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
     /* Advanced Options Toggle */
@@ -1031,6 +1113,8 @@
           Ready
         </div>
         <div style="margin-top:10px;">
+          <a href="/settings" style="font-size:12px;color:var(--muted);">Settings</a>
+          <span style="color:var(--border);margin:0 6px;">|</span>
           <a href="/diagnostics" target="_blank" style="font-size:12px;color:var(--muted);">Open diagnostics</a>
         </div>
       </div>
@@ -1045,9 +1129,18 @@
           <p>Find and explore available snapshots for your website</p>
         </div>
         <div class="quick-actions">
+          <a href="/" class="btn btn-primary">➕ New Project</a>
           <button type="button" class="btn btn-success" id="quick-download-btn" style="display:none;">
             ⚡ Quick Download
           </button>
+        </div>
+      </div>
+
+      <div id="continue-card" class="continue-card">
+        <p class="continue-title" id="continue-title">Continue where you left off</p>
+        <p class="continue-text" id="continue-text"></p>
+        <div class="continue-actions">
+          <button type="button" class="btn btn-primary" id="continue-action-btn">Open Next Step</button>
         </div>
       </div>
 
@@ -1093,8 +1186,8 @@
             </div>
           </div>
 
-          <input type="hidden" id="display-limit-input" name="display_limit" value="10">
-          <input type="hidden" id="cdx-limit-input" name="cdx_limit" value="1500">
+          <input type="hidden" id="display-limit-input" name="display_limit" value="{{ app_settings.default_display_limit }}">
+          <input type="hidden" id="cdx-limit-input" name="cdx_limit" value="{{ app_settings.default_inspect_cdx_limit }}">
 
           <div class="form-row">
             <div class="form-group">
@@ -1262,7 +1355,7 @@
             </select>
           </div>
           <div class="form-group">
-            <input type="hidden" name="cdx_limit" value="12000">
+            <input type="hidden" name="cdx_limit" value="{{ app_settings.default_analyze_cdx_limit }}">
             <div id="analyze-advanced-panel" style="display:none;">
               <label>Analysis mode</label>
               <select name="cdx_limit" id="analyze-depth">
@@ -1274,9 +1367,14 @@
           </div>
           <div class="form-group">
             <label>&nbsp;</label>
-            <button type="submit" class="btn btn-primary" style="width:100%;">Analyze Selected Snapshot</button>
+            <button id="analyze-submit-btn" type="submit" class="btn btn-primary" style="width:100%;">Analyze Selected Snapshot</button>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button type="button" class="btn btn-secondary" id="open-cached-snapshot-btn" style="width:100%;">Load Saved Data For Snapshot</button>
           </div>
         </form>
+        <p id="analyze-flow-hint" class="flow-hint">Pick a snapshot, then run analysis.</p>
 
         <div id="analyze-live" class="progress-container" style="display:none;">
           <div class="progress-info"><span id="analyze-live-text">Analyzing...</span><strong id="analyze-live-percent">0%</strong></div>
@@ -1296,7 +1394,7 @@
           <input type="hidden" name="display_limit" value="{{ inspect.display_limit or 10 }}">
           <input type="hidden" name="inspect_cdx_limit" value="{{ inspect.cdx_limit or 1500 }}">
           <input type="hidden" name="analyze_count" id="analyze-count-input" value="100000">
-          <input type="hidden" name="analyze_cdx_limit" id="analyze-cdx-input" value="12000">
+          <input type="hidden" name="analyze_cdx_limit" id="analyze-cdx-input" value="{{ app_settings.default_analyze_cdx_limit }}">
           <div class="form-group" style="grid-column: span 2;">
             <div id="batch-advanced-panel" style="display:none;">
               <label>Batch analysis options</label>
@@ -1318,7 +1416,7 @@
           </div>
           <div class="form-group">
             <label>&nbsp;</label>
-            <button type="submit" class="btn btn-secondary" style="width:100%;">Run Deep Step-by-Step Analysis</button>
+            <button id="batch-submit-btn" type="submit" class="btn btn-secondary" style="width:100%;">Run Deep Step-by-Step Analysis</button>
           </div>
         </form>
 
@@ -1393,11 +1491,6 @@
           </div>
         </div>
 
-        <div class="alert alert-success" style="margin-top:10px;">
-          <span>✅</span>
-          <span><strong>Next steps:</strong> 1) Build sitemap, 2) Check have vs missing, 3) Download offline copy</span>
-        </div>
-
         <div class="action-bar" id="download-results">
           <form method="post" action="/download" id="download-form-simple" class="form-row" style="width:100%;">
             <input type="hidden" name="target_url" value="{{ analysis.target_url }}">
@@ -1405,14 +1498,15 @@
             <input type="hidden" name="output_root" value="{{ output_root }}">
             <div class="form-group">
               <label>Max files (default safe)</label>
-              <input type="number" name="max_files" min="50" max="5000" value="500">
+              <input type="number" name="max_files" min="50" max="5000" value="{{ app_settings.default_max_files }}">
             </div>
             <div class="form-group">
               <label>&nbsp;</label>
-              <button type="submit" class="btn btn-success" style="width:100%;">Next: Download Offline Copy</button>
+              <button id="download-submit-btn" type="submit" class="btn btn-success" style="width:100%;">Download Offline Copy</button>
             </div>
           </form>
         </div>
+        <p id="download-flow-hint" class="flow-hint">Run download to build your local offline copy.</p>
 
         <div id="download-live" class="progress-container" style="display:none;">
           <div class="progress-info">
@@ -1433,16 +1527,17 @@
             <input type="hidden" name="target_url" value="{{ analysis.target_url }}">
             <input type="hidden" name="selected_snapshot" value="{{ analysis.selected_snapshot }}">
             <input type="hidden" name="output_root" value="{{ output_root }}">
-            <input type="hidden" name="cdx_limit" value="1500">
-            <button type="submit" class="btn btn-secondary">Show Sitemap Details</button>
+            <input type="hidden" name="cdx_limit" value="{{ app_settings.default_inspect_cdx_limit }}">
+            <button id="sitemap-submit-btn" type="submit" class="btn btn-secondary">Show Sitemap Details</button>
           </form>
           <form method="post" action="/check" id="check-form">
             <input type="hidden" name="target_url" value="{{ analysis.target_url }}">
             <input type="hidden" name="selected_snapshot" value="{{ analysis.selected_snapshot }}">
             <input type="hidden" name="output_root" value="{{ output_root }}">
-            <button type="submit" class="btn btn-secondary">Check Have vs Missing</button>
+            <button id="check-submit-btn" type="submit" class="btn btn-secondary">Check Downloaded Files</button>
           </form>
         </div>
+        <p id="check-manifest-hint" class="status-line" style="margin-top:8px;">Tip: First click Download Offline Copy. After files are downloaded, use Check Downloaded Files.</p>
 
         <div id="sitemap-live" class="progress-container" style="display:none;">
           <div class="progress-info"><span id="sitemap-live-text">Building sitemap...</span><strong id="sitemap-live-percent">0%</strong></div>
@@ -1536,6 +1631,13 @@
       {% if sitemap %}
       <div class="card" id="sitemap-results">
         <h3 class="card-title">🗺️ Sitemap View</h3>
+        {% if sitemap._cache %}
+        <div class="cache-note">
+          <span class="cache-badge">Source: {{ sitemap._cache.source }}</span>
+          <span class="cache-badge">Age: {{ sitemap._cache.age_seconds }}s</span>
+          {% if selected_snapshot %}<span class="cache-badge">Snapshot: {{ selected_snapshot }}</span>{% endif %}
+        </div>
+        {% endif %}
         <div class="stats-grid">
           <div class="stat-card"><div class="stat-value">{{ sitemap.total_pages }}</div><div class="stat-label">Pages</div></div>
           <div class="stat-card"><div class="stat-value">{{ sitemap.groups|length }}</div><div class="stat-label">Folder groups</div></div>
@@ -1577,7 +1679,14 @@
 
       {% if check %}
       <div class="card" id="check-results">
-        <h3 class="card-title">🧩 Have vs Missing</h3>
+        <h3 class="card-title">🧩 Downloaded vs Missing Files</h3>
+        {% if check._cache %}
+        <div class="cache-note">
+          <span class="cache-badge">Source: {{ check._cache.source }}</span>
+          <span class="cache-badge">Age: {{ check._cache.age_seconds }}s</span>
+          {% if check.snapshot %}<span class="cache-badge">Snapshot: {{ check.snapshot }}</span>{% endif %}
+        </div>
+        {% endif %}
         <div class="stats-grid">
           <div class="stat-card"><div class="stat-value">{{ check.have_count }}</div><div class="stat-label">Matched</div></div>
           <div class="stat-card"><div class="stat-value">{{ check.missing_count }}</div><div class="stat-label">Missing</div></div>
@@ -1590,13 +1699,14 @@
           <input type="hidden" name="output_root" value="{{ output_root }}">
           <div class="form-group">
             <label>Missing files to try</label>
-            <input type="number" name="missing_limit" min="1" max="5000" value="300">
+              <input type="number" name="missing_limit" min="1" max="5000" value="{{ app_settings.default_missing_limit }}">
           </div>
           <div class="form-group">
             <label>&nbsp;</label>
-            <button type="submit" class="btn btn-secondary" style="width:100%;">Download Missing Files</button>
+            <button id="missing-submit-btn" type="submit" class="btn btn-secondary" style="width:100%;">Recover Missing Files</button>
           </div>
         </form>
+        <p id="missing-flow-hint" class="flow-hint">Use this after a check result shows missing files.</p>
 
         <div class="detail-grid">
           <div class="list-box">
@@ -1698,7 +1808,8 @@
       hasResult: {% if result %}true{% else %}false{% endif %},
       inspectTotal: {% if inspect %}{{ inspect.total_snapshots }}{% else %}0{% endif %},
       analysisSnapshot: {{ (analysis.selected_snapshot if analysis else '')|tojson }},
-      resultFiles: {% if result %}{{ result.files_downloaded }}{% else %}0{% endif %}
+      resultFiles: {% if result %}{{ result.files_downloaded }}{% else %}0{% endif %},
+      checkMissing: {% if check %}{{ check.missing_count }}{% else %}0{% endif %}
     };
   </script>
   <script src="{{ url_for('static', filename='js/core.js') }}"></script>

@@ -108,11 +108,64 @@ class SQLiteStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value_json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_inspect_cache_target_created ON inspect_cache(target_url, created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_analyze_cache_target_snapshot_created ON analyze_cache(target_url, snapshot, created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sitemap_cache_target_snapshot_created ON sitemap_cache(target_url, snapshot, created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_check_cache_target_snapshot_created ON check_cache(target_url, snapshot, created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_history_target_created ON jobs_history(target_url, created_at DESC)")
+
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT value_json FROM app_settings WHERE key = ? LIMIT 1",
+                (key,),
+            ).fetchone()
+        if not row:
+            return default
+        try:
+            return json.loads(row["value_json"])
+        except json.JSONDecodeError:
+            return default
+
+    def list_settings(self) -> Dict[str, Any]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT key, value_json FROM app_settings").fetchall()
+        out: Dict[str, Any] = {}
+        for row in rows:
+            key = str(row["key"])
+            try:
+                out[key] = json.loads(row["value_json"])
+            except json.JSONDecodeError:
+                continue
+        return out
+
+    def upsert_setting(self, key: str, value: Any) -> None:
+        now = int(time.time())
+        value_json = json.dumps(value)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings(key, value_json, updated_at)
+                VALUES(?,?,?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value_json=excluded.value_json,
+                    updated_at=excluded.updated_at
+                """,
+                (key, value_json, now),
+            )
+
+    def delete_setting(self, key: str) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute("DELETE FROM app_settings WHERE key = ?", (key,))
 
     def _normalize_target_url(self, target_url: str) -> str:
         raw = (target_url or "").strip()

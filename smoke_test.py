@@ -82,6 +82,63 @@ class AppSmokeTest(unittest.TestCase):
         self.assertTrue(payload.get("ok"))
         self.assertIn("output_deleted", payload)
 
+    def test_delete_preview_requires_target_url(self) -> None:
+        response = self.client.get("/recent-projects/delete-preview")
+        self.assertEqual(response.status_code, 400)
+
+    def test_delete_preview_returns_ok_payload(self) -> None:
+        response = self.client.get("/recent-projects/delete-preview", query_string={"target_url": "https://example.com/nope"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json() or {}
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("deletable", payload)
+
+    def test_settings_page_loads(self) -> None:
+        response = self.client.get("/settings")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Settings", response.data)
+
+    def test_settings_save_works(self) -> None:
+        response = self.client.post(
+            "/settings",
+            data={
+                "theme_accent": "#8b5e3c",
+                "theme_accent_2": "#6d4a30",
+                "theme_success": "#4a7c59",
+                "theme_bg": "#f8f5f0",
+                "theme_card": "#ffffff",
+                "theme_text": "#2d241c",
+                "theme_muted": "#6b5b4d",
+                "theme_border": "#e0d6c8",
+                "default_output_root": "./output",
+                "default_display_limit": "10",
+                "default_inspect_cdx_limit": "1500",
+                "default_analyze_cdx_limit": "12000",
+                "default_max_files": "400",
+                "default_missing_limit": "300",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Settings saved", response.data)
+
+    def test_check_preflight_requires_url(self) -> None:
+        response = self.client.get("/check/preflight")
+        self.assertEqual(response.status_code, 400)
+
+    def test_check_preflight_returns_payload(self) -> None:
+        response = self.client.get(
+            "/check/preflight",
+            query_string={
+                "target_url": "https://example.com",
+                "selected_snapshot": "20200101000000",
+                "output_root": "./output",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json() or {}
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("manifest_found", payload)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
