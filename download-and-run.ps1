@@ -1,11 +1,11 @@
-$ErrorActionPreference = "Stop"
-
 param(
   [string]$RepoOwner = "VJ-Ranga",
   [string]$RepoName = "Wayback-offline-builder",
   [string]$Ref = "main",
   [string]$TargetDir = "wayback-offline-builder"
 )
+
+$ErrorActionPreference = "Stop"
 
 if (Test-Path $TargetDir) {
   throw "Target directory '$TargetDir' already exists. Use -TargetDir <new-path> or remove existing directory."
