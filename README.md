@@ -31,6 +31,20 @@ If you use it in production-like environments, please review settings carefully 
 
 ## Quick Start
 
+### One-command Linux Install (no git)
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/VJ-Ranga/Wayback-offline-builder/main/download-and-run.sh)
+```
+
+or
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/VJ-Ranga/Wayback-offline-builder/main/download-and-run.sh)
+```
+
+This downloads the full project archive, runs `install.sh`, and starts the app.
+
 ### Windows (PowerShell)
 
 ```powershell
@@ -47,6 +61,8 @@ chmod +x install.sh run.sh update.sh uninstall.sh
 ```
 
 Open: `http://127.0.0.1:5000`
+
+Tip: set `APP_SECRET_KEY` in `.env` (or environment) to keep sessions stable across restarts.
 
 Installer prompts now let you choose:
 - DB preference (`sqlite` or `mysql` config values)
@@ -69,6 +85,8 @@ python async_smoke_test.py
 - Runtime logs: `runtime/server.log`
 
 Local runtime files (`.env`, sqlite DB, output, runtime) are ignored by git and are not published.
+
+Disk usage note: offline downloads can grow quickly for large sites, so monitor free space in your configured `OUTPUT_ROOT_DIR`.
 
 Deleting a project from UI removes DB/cache/history for that domain and can optionally delete local output files.
 
@@ -109,6 +127,8 @@ What update scripts do:
 - update Python dependencies in `.venv`
 
 ## Environment Options
+
+Copy `.env.example` to `.env` and adjust values for your environment.
 
 - `PORT` (default `5000`)
 - `HOST` (default `127.0.0.1`)
