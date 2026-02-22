@@ -98,6 +98,13 @@ class AppSmokeTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Settings", response.data)
 
+    def test_settings_check_update_endpoint(self) -> None:
+        response = self.client.get("/settings/check-update")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json() or {}
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("message", payload)
+
     def test_settings_save_works(self) -> None:
         response = self.client.post(
             "/settings",

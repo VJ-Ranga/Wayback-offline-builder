@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+try:
+    import pymysql
+except Exception:  # pragma: no cover
+    pymysql = None
+
 
 class SQLiteStore:
     def __init__(self, db_path: Path) -> None:
@@ -791,3 +796,310 @@ class SQLiteStore:
             }
         except json.JSONDecodeError:
             return None
+
+
+class _MySQLResult:
+    def __init__(self, rows: Optional[List[Dict[str, Any]]], rowcount: int) -> None:
+        self._rows = rows or []
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class _MySQLConnectionAdapter:
+    def __init__(self, conn) -> None:
+        self._conn = conn
+
+    def execute(self, query: str, params: tuple = ()):
+        sql = query.replace("?", "%s")
+        cur = self._conn.cursor()
+        try:
+            cur.execute(sql, params)
+            rows = cur.fetchall() if cur.description is not None else []
+            return _MySQLResult(rows=rows, rowcount=int(cur.rowcount or 0))
+        finally:
+            cur.close()
+
+
+class MySQLStore(SQLiteStore):
+    def __init__(self, host: str, port: int, user: str, password: str, database: str) -> None:
+        if pymysql is None:
+            raise RuntimeError("PyMySQL is required for MySQL backend. Install requirements first.")
+        self.host = host
+        self.port = port
+        self.user = user
+        self.password = password
+        self.database = database
+        self.db_path = Path("mysql")
+        self._lock = threading.Lock()
+        self._init_db()
+
+    @contextmanager
+    def _connect(self):
+        conn = pymysql.connect(
+            host=self.host,
+            port=self.port,
+            user=self.user,
+            password=self.password,
+            database=self.database,
+            charset="utf8mb4",
+            autocommit=False,
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=10,
+            read_timeout=30,
+            write_timeout=30,
+        )
+        try:
+            yield _MySQLConnectionAdapter(conn)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _init_db(self) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS projects (
+                    target_url VARCHAR(512) PRIMARY KEY,
+                    domain VARCHAR(255) NOT NULL,
+                    last_output_root TEXT,
+                    last_snapshot VARCHAR(64),
+                    last_site_type VARCHAR(255),
+                    last_estimated_files BIGINT,
+                    last_estimated_size BIGINT,
+                    created_at BIGINT NOT NULL,
+                    updated_at BIGINT NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS inspect_cache (
+                    cache_key VARCHAR(255) PRIMARY KEY,
+                    target_url VARCHAR(512) NOT NULL,
+                    display_limit BIGINT NOT NULL,
+                    cdx_limit BIGINT NOT NULL,
+                    payload_json LONGTEXT NOT NULL,
+                    created_at BIGINT NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS analyze_cache (
+                    cache_key VARCHAR(255) PRIMARY KEY,
+                    target_url VARCHAR(512) NOT NULL,
+                    snapshot VARCHAR(64),
+                    cdx_limit BIGINT NOT NULL,
+                    payload_json LONGTEXT NOT NULL,
+                    created_at BIGINT NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sitemap_cache (
+                    cache_key VARCHAR(255) PRIMARY KEY,
+                    target_url VARCHAR(512) NOT NULL,
+                    snapshot VARCHAR(64),
+                    payload_json LONGTEXT NOT NULL,
+                    created_at BIGINT NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS check_cache (
+                    cache_key VARCHAR(255) PRIMARY KEY,
+                    target_url VARCHAR(512) NOT NULL,
+                    snapshot VARCHAR(64),
+                    payload_json LONGTEXT NOT NULL,
+                    created_at BIGINT NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS jobs_history (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    job_type VARCHAR(64) NOT NULL,
+                    target_url VARCHAR(512) NOT NULL,
+                    snapshot VARCHAR(64),
+                    state VARCHAR(32) NOT NULL,
+                    summary_json LONGTEXT,
+                    created_at BIGINT NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    `key` VARCHAR(255) PRIMARY KEY,
+                    value_json LONGTEXT NOT NULL,
+                    updated_at BIGINT NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            for statement in [
+                "CREATE INDEX idx_inspect_cache_target_created ON inspect_cache(target_url, created_at)",
+                "CREATE INDEX idx_analyze_cache_target_snapshot_created ON analyze_cache(target_url, snapshot, created_at)",
+                "CREATE INDEX idx_sitemap_cache_target_snapshot_created ON sitemap_cache(target_url, snapshot, created_at)",
+                "CREATE INDEX idx_check_cache_target_snapshot_created ON check_cache(target_url, snapshot, created_at)",
+                "CREATE INDEX idx_jobs_history_target_created ON jobs_history(target_url, created_at)",
+            ]:
+                try:
+                    conn.execute(statement)
+                except Exception:
+                    pass
+
+    def upsert_setting(self, key: str, value: Any) -> None:
+        now = int(time.time())
+        value_json = json.dumps(value)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings(`key`, value_json, updated_at)
+                VALUES(%s,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    value_json=VALUES(value_json),
+                    updated_at=VALUES(updated_at)
+                """,
+                (key, value_json, now),
+            )
+
+    def set_inspect_cache(
+        self,
+        cache_key: str,
+        target_url: str,
+        display_limit: int,
+        cdx_limit: int,
+        payload: Dict[str, Any],
+    ) -> None:
+        target_url = self._normalize_target_url(target_url)
+        now = int(time.time())
+        data = json.dumps(payload)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO inspect_cache(cache_key,target_url,display_limit,cdx_limit,payload_json,created_at)
+                VALUES(%s,%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    target_url=VALUES(target_url),
+                    display_limit=VALUES(display_limit),
+                    cdx_limit=VALUES(cdx_limit),
+                    payload_json=VALUES(payload_json),
+                    created_at=VALUES(created_at)
+                """,
+                (cache_key, target_url, display_limit, cdx_limit, data, now),
+            )
+
+    def set_analyze_cache(
+        self,
+        cache_key: str,
+        target_url: str,
+        snapshot: str,
+        cdx_limit: int,
+        payload: Dict[str, Any],
+    ) -> None:
+        target_url = self._normalize_target_url(target_url)
+        now = int(time.time())
+        data = json.dumps(payload)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO analyze_cache(cache_key,target_url,snapshot,cdx_limit,payload_json,created_at)
+                VALUES(%s,%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    target_url=VALUES(target_url),
+                    snapshot=VALUES(snapshot),
+                    cdx_limit=VALUES(cdx_limit),
+                    payload_json=VALUES(payload_json),
+                    created_at=VALUES(created_at)
+                """,
+                (cache_key, target_url, snapshot, cdx_limit, data, now),
+            )
+
+    def set_sitemap_cache(self, cache_key: str, target_url: str, snapshot: str, payload: Dict[str, Any]) -> None:
+        target_url = self._normalize_target_url(target_url)
+        now = int(time.time())
+        data = json.dumps(payload)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sitemap_cache(cache_key,target_url,snapshot,payload_json,created_at)
+                VALUES(%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    target_url=VALUES(target_url),
+                    snapshot=VALUES(snapshot),
+                    payload_json=VALUES(payload_json),
+                    created_at=VALUES(created_at)
+                """,
+                (cache_key, target_url, snapshot, data, now),
+            )
+
+    def set_check_cache(self, cache_key: str, target_url: str, snapshot: str, payload: Dict[str, Any]) -> None:
+        target_url = self._normalize_target_url(target_url)
+        now = int(time.time())
+        data = json.dumps(payload)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO check_cache(cache_key,target_url,snapshot,payload_json,created_at)
+                VALUES(%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    target_url=VALUES(target_url),
+                    snapshot=VALUES(snapshot),
+                    payload_json=VALUES(payload_json),
+                    created_at=VALUES(created_at)
+                """,
+                (cache_key, target_url, snapshot, data, now),
+            )
+
+    def upsert_project(
+        self,
+        target_url: str,
+        output_root: Optional[str] = None,
+        snapshot: Optional[str] = None,
+        site_type: Optional[str] = None,
+        estimated_files: Optional[int] = None,
+        estimated_size: Optional[int] = None,
+    ) -> None:
+        target_url = self._normalize_target_url(target_url)
+        now = int(time.time())
+        domain = urlparse(target_url).netloc or target_url
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO projects(
+                    target_url,domain,last_output_root,last_snapshot,last_site_type,
+                    last_estimated_files,last_estimated_size,created_at,updated_at
+                )
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    domain=VALUES(domain),
+                    last_output_root=COALESCE(VALUES(last_output_root), last_output_root),
+                    last_snapshot=COALESCE(VALUES(last_snapshot), last_snapshot),
+                    last_site_type=COALESCE(VALUES(last_site_type), last_site_type),
+                    last_estimated_files=COALESCE(VALUES(last_estimated_files), last_estimated_files),
+                    last_estimated_size=COALESCE(VALUES(last_estimated_size), last_estimated_size),
+                    updated_at=VALUES(updated_at)
+                """,
+                (
+                    target_url,
+                    domain,
+                    output_root,
+                    snapshot,
+                    site_type,
+                    estimated_files,
+                    estimated_size,
+                    now,
+                    now,
+                ),
+            )

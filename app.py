@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import csv
 import io
+import subprocess
 import threading
 import time
 import uuid
@@ -17,7 +18,7 @@ from urllib.parse import urlparse
 from flask import Flask, Response, jsonify, render_template, request, session
 
 from archiver import ArchiveWebTool
-from db import SQLiteStore
+from db import MySQLStore, SQLiteStore
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -29,8 +30,11 @@ sqlite_candidate = Path(RAW_SQLITE_DB_PATH).expanduser()
 DB_PATH = sqlite_candidate if sqlite_candidate.is_absolute() else (BASE_DIR / sqlite_candidate)
 DB_PATH = DB_PATH.resolve()
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-if DB_BACKEND != "sqlite":
-    print(f"[startup] DB_BACKEND='{DB_BACKEND}' is not supported yet; using sqlite at {DB_PATH}")
+MYSQL_HOST = (os.environ.get("MYSQL_HOST") or "127.0.0.1").strip()
+MYSQL_PORT = int((os.environ.get("MYSQL_PORT") or "3306").strip())
+MYSQL_DATABASE = (os.environ.get("MYSQL_DATABASE") or "wayback_builder").strip()
+MYSQL_USER = (os.environ.get("MYSQL_USER") or "root").strip()
+MYSQL_PASSWORD = (os.environ.get("MYSQL_PASSWORD") or "").strip()
 OUTPUT_ROOT_DIR = Path(os.environ.get("OUTPUT_ROOT_DIR", str(OUTPUT_DIR))).expanduser().resolve()
 OUTPUT_ROOT_DIR.mkdir(parents=True, exist_ok=True)
 ALLOW_UNSAFE_OUTPUT_ROOT = os.environ.get("ALLOW_UNSAFE_OUTPUT_ROOT", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -40,7 +44,16 @@ app.secret_key = os.environ.get("APP_SECRET_KEY") or secrets.token_hex(32)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 tool = ArchiveWebTool(timeout=60)
-store = SQLiteStore(DB_PATH)
+if DB_BACKEND == "mysql":
+    store = MySQLStore(
+        host=MYSQL_HOST,
+        port=MYSQL_PORT,
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD,
+        database=MYSQL_DATABASE,
+    )
+else:
+    store = SQLiteStore(DB_PATH)
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 MISSING_JOBS: dict[str, dict] = {}
@@ -674,10 +687,138 @@ def _safe_hex_color(value: str, fallback: str) -> str:
     return fallback
 
 
+def _read_local_env() -> dict[str, str]:
+    path = BASE_DIR / ".env"
+    if not path.exists():
+        return {}
+    out: dict[str, str] = {}
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key:
+                out[key] = value
+    except Exception:
+        return {}
+    return out
+
+
+def _write_local_env(values: dict[str, str]) -> None:
+    path = BASE_DIR / ".env"
+    ordered_keys = [
+        "DB_BACKEND",
+        "SQLITE_DB_PATH",
+        "OUTPUT_ROOT_DIR",
+        "HOST",
+        "PORT",
+        "MYSQL_HOST",
+        "MYSQL_PORT",
+        "MYSQL_DATABASE",
+        "MYSQL_USER",
+        "MYSQL_PASSWORD",
+    ]
+    seen: set[str] = set()
+    lines: list[str] = []
+    for key in ordered_keys:
+        if key in values and str(values[key]).strip() != "":
+            lines.append(f"{key}={values[key]}")
+            seen.add(key)
+    for key in sorted(values.keys()):
+        if key in seen:
+            continue
+        val = str(values[key]).strip()
+        if val == "":
+            continue
+        lines.append(f"{key}={val}")
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def _load_db_config() -> dict[str, str]:
+    env_values = _read_local_env()
+    db_backend = (env_values.get("DB_BACKEND") or os.environ.get("DB_BACKEND") or "sqlite").strip().lower()
+    if db_backend not in {"sqlite", "mysql"}:
+        db_backend = "sqlite"
+    return {
+        "db_backend": db_backend,
+        "sqlite_db_path": (env_values.get("SQLITE_DB_PATH") or os.environ.get("SQLITE_DB_PATH") or str(DB_PATH)).strip(),
+        "mysql_host": (env_values.get("MYSQL_HOST") or os.environ.get("MYSQL_HOST") or "127.0.0.1").strip(),
+        "mysql_port": (env_values.get("MYSQL_PORT") or os.environ.get("MYSQL_PORT") or "3306").strip(),
+        "mysql_database": (env_values.get("MYSQL_DATABASE") or os.environ.get("MYSQL_DATABASE") or "wayback_builder").strip(),
+        "mysql_user": (env_values.get("MYSQL_USER") or os.environ.get("MYSQL_USER") or "root").strip(),
+        "mysql_password_set": "1" if (env_values.get("MYSQL_PASSWORD") or os.environ.get("MYSQL_PASSWORD") or "").strip() else "0",
+    }
+
+
+def _run_git_output(args: list[str]) -> str:
+    proc = subprocess.run(
+        args,
+        cwd=str(BASE_DIR),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=8,
+    )
+    return (proc.stdout or "").strip()
+
+
+def _check_repo_update_status() -> dict:
+    try:
+        _run_git_output(["git", "rev-parse", "--is-inside-work-tree"])
+    except Exception:
+        return {"ok": False, "error": "Git repository not available"}
+
+    try:
+        branch = _run_git_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]) or "unknown"
+        current_commit = _run_git_output(["git", "rev-parse", "--short", "HEAD"]) or "unknown"
+        remote_url = _run_git_output(["git", "config", "--get", "remote.origin.url"]) or ""
+        subprocess.run(["git", "fetch", "--quiet"], cwd=str(BASE_DIR), check=False, timeout=10)
+        counts = _run_git_output(["git", "rev-list", "--left-right", "--count", "HEAD...@{u}"])
+        ahead, behind = 0, 0
+        if counts:
+            left, right = counts.split()
+            ahead = int(left)
+            behind = int(right)
+        return {
+            "ok": True,
+            "branch": branch,
+            "current_commit": current_commit,
+            "remote_url": remote_url,
+            "ahead": ahead,
+            "behind": behind,
+            "update_available": behind > 0,
+            "message": (
+                f"Update available: {behind} commit(s) behind origin."
+                if behind > 0
+                else "You are up to date with origin."
+            ),
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"Could not check updates: {exc}"}
+
+
 @app.get("/settings")
 def settings_page():
     settings = _load_app_settings()
-    return render_template("settings.html", settings=settings, saved=request.args.get("saved") == "1", error=None)
+    return render_template(
+        "settings.html",
+        settings=settings,
+        db_config=_load_db_config(),
+        active_db_backend=DB_BACKEND,
+        saved=request.args.get("saved") == "1",
+        error=None,
+    )
+
+
+@app.get("/settings/check-update")
+def settings_check_update():
+    payload = _check_repo_update_status()
+    if not payload.get("ok"):
+        return jsonify(payload), 500
+    return jsonify(payload)
 
 
 @app.post("/settings")
@@ -701,8 +842,41 @@ def settings_save():
     }
     for key, value in updates.items():
         store.upsert_setting(key, value)
+
+    db_backend = (request.form.get("db_backend", "sqlite") or "sqlite").strip().lower()
+    if db_backend not in {"sqlite", "mysql"}:
+        db_backend = "sqlite"
+    sqlite_db_path = (request.form.get("sqlite_db_path", str(DB_PATH)) or str(DB_PATH)).strip()
+    mysql_host = (request.form.get("mysql_host", "127.0.0.1") or "127.0.0.1").strip()
+    mysql_port = (request.form.get("mysql_port", "3306") or "3306").strip()
+    mysql_database = (request.form.get("mysql_database", "wayback_builder") or "wayback_builder").strip()
+    mysql_user = (request.form.get("mysql_user", "root") or "root").strip()
+    mysql_password_input = (request.form.get("mysql_password", "") or "").strip()
+
+    env_values = _read_local_env()
+    env_values["DB_BACKEND"] = db_backend
+    env_values["SQLITE_DB_PATH"] = sqlite_db_path
+    env_values["MYSQL_HOST"] = mysql_host
+    env_values["MYSQL_PORT"] = mysql_port
+    env_values["MYSQL_DATABASE"] = mysql_database
+    env_values["MYSQL_USER"] = mysql_user
+    if mysql_password_input:
+        env_values["MYSQL_PASSWORD"] = mysql_password_input
+    elif "MYSQL_PASSWORD" not in env_values:
+        existing_pwd = (os.environ.get("MYSQL_PASSWORD") or "").strip()
+        if existing_pwd:
+            env_values["MYSQL_PASSWORD"] = existing_pwd
+    _write_local_env(env_values)
+
     _load_app_settings(force=True)
-    return render_template("settings.html", settings=_load_app_settings(), saved=True, error=None)
+    return render_template(
+        "settings.html",
+        settings=_load_app_settings(),
+        db_config=_load_db_config(),
+        active_db_backend=DB_BACKEND,
+        saved=True,
+        error=None,
+    )
 
 
 @app.post("/settings/reset")
@@ -710,7 +884,14 @@ def settings_reset():
     for key, value in DEFAULT_APP_SETTINGS.items():
         store.upsert_setting(key, value)
     _load_app_settings(force=True)
-    return render_template("settings.html", settings=_load_app_settings(), saved=True, error=None)
+    return render_template(
+        "settings.html",
+        settings=_load_app_settings(),
+        db_config=_load_db_config(),
+        active_db_backend=DB_BACKEND,
+        saved=True,
+        error=None,
+    )
 
 
 @app.post("/recent-projects/delete")
@@ -979,8 +1160,21 @@ def _is_within(parent: Path, child: Path) -> bool:
         return False
 
 
-def _resolve_output_root(value: Optional[str]) -> Path:
+def _sanitize_output_root_input(value: str) -> str:
     raw = (value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith(("http://", "https://")):
+        raise ValueError("Output path must be a filesystem path, not a URL")
+    if len(raw) > 1024:
+        raise ValueError("Output path is too long")
+    if any(ord(ch) < 32 for ch in raw):
+        raise ValueError("Output path contains invalid control characters")
+    return raw
+
+
+def _resolve_output_root(value: Optional[str]) -> Path:
+    raw = _sanitize_output_root_input(value or "")
     if not raw:
         path = OUTPUT_ROOT_DIR
     else:

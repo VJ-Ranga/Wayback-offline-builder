@@ -199,6 +199,25 @@
       background: #ffe9e9;
     }
 
+    .sidebar-credit {
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border);
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .sidebar-credit a {
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .sidebar-credit a:hover {
+      text-decoration: underline;
+    }
+
+
     /* Main Content */
     .main {
       padding: 24px 28px;
@@ -388,6 +407,17 @@
     .btn-quiet:hover {
       background: #f5f1ec;
       border-color: #cfc2b2;
+    }
+
+    .btn-support {
+      background: #fff7e6;
+      color: #7a5a12;
+      border: 1px solid #e8d4a2;
+    }
+
+    .btn-support:hover {
+      background: #ffefcc;
+      color: #7a5a12;
     }
 
     .btn:disabled {
@@ -1117,6 +1147,10 @@
           <span style="color:var(--border);margin:0 6px;">|</span>
           <a href="/diagnostics" target="_blank" style="font-size:12px;color:var(--muted);">Open diagnostics</a>
         </div>
+        <div class="sidebar-credit">
+          <div>Designed by <a href="https://vjranga.com" target="_blank" rel="noopener">vjranga.com</a></div>
+          <div>Copyright &copy; 2026 VJ Wayback Offline Builder. All rights reserved.</div>
+        </div>
       </div>
     </aside>
 
@@ -1129,6 +1163,7 @@
           <p>Find and explore available snapshots for your website</p>
         </div>
         <div class="quick-actions">
+          <a href="https://buymeacoffee.com/vjranga" target="_blank" rel="noopener" class="btn btn-support">☕ Support this project</a>
           <a href="/" class="btn btn-primary">➕ New Project</a>
           <button type="button" class="btn btn-success" id="quick-download-btn" style="display:none;">
             ⚡ Quick Download

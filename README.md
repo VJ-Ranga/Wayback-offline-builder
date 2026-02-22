@@ -2,6 +2,16 @@
 
 A local-first Flask app to inspect Wayback snapshots, analyze site structure, generate sitemap/check reports, and build a recoverable offline copy.
 
+## Project Status
+
+This project is actively under development and evolving quickly.
+
+- It is currently a functional beta and intended as a practical, learning-driven tool.
+- APIs, workflows, and configuration behavior may still change between updates.
+- Feedback, bug reports, and suggestions are welcome and appreciated.
+
+If you use it in production-like environments, please review settings carefully and test with your own data and limits first.
+
 ## Key Features
 
 - Inspect snapshots with cache-first behavior and optional force refresh from Archive.
@@ -31,7 +41,7 @@ A local-first Flask app to inspect Wayback snapshots, analyze site structure, ge
 ### Linux / macOS
 
 ```bash
-chmod +x install.sh run.sh uninstall.sh
+chmod +x install.sh run.sh update.sh uninstall.sh
 ./install.sh
 ./run.sh
 ```
@@ -43,7 +53,7 @@ Installer prompts now let you choose:
 - SQLite DB file location
 - Output folder location
 
-Note: app runtime currently uses SQLite. If `mysql` is chosen, installer saves mysql values in `.env` for future backend support, and the app continues with SQLite fallback.
+If `mysql` is selected, installer creates the database (if missing), and app startup auto-creates required tables.
 
 ## Tests
 
@@ -57,6 +67,8 @@ python async_smoke_test.py
 - DB/cache file: `archive_cache.sqlite3`
 - Downloaded files: `output/`
 - Runtime logs: `runtime/server.log`
+
+Local runtime files (`.env`, sqlite DB, output, runtime) are ignored by git and are not published.
 
 Deleting a project from UI removes DB/cache/history for that domain and can optionally delete local output files.
 
@@ -74,19 +86,48 @@ Linux / macOS:
 ./uninstall.sh
 ```
 
+## Update (Git)
+
+Use this when you want the latest tool changes from the repo.
+
+Windows:
+
+```powershell
+.\update.ps1
+```
+
+Linux / macOS:
+
+```bash
+./update.sh
+```
+
+What update scripts do:
+- ensure working tree is clean before pulling
+- backup SQLite DB to `runtime/db-backups/`
+- `git pull --ff-only`
+- update Python dependencies in `.venv`
+
 ## Environment Options
 
 - `PORT` (default `5000`)
 - `HOST` (default `127.0.0.1`)
 - `FLASK_DEBUG` (default `0`)
+- `DB_BACKEND` (`sqlite` default, `mysql` config can be saved)
+- `SQLITE_DB_PATH` (default `./archive_cache.sqlite3`)
+- `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` (saved config)
 - `MAX_ACTIVE_JOBS` (default `4`)
 - `JOB_RETENTION_SECONDS` (default `3600`)
 - `JOB_CLEANUP_INTERVAL_SECONDS` (default `60`)
 - `OUTPUT_ROOT_DIR` (default `./output`)
 - `ALLOW_UNSAFE_OUTPUT_ROOT` (default `0`, restricts output to `OUTPUT_ROOT_DIR`)
+- `WAYBACK_MIN_REQUEST_INTERVAL_MS` (default `250`, minimum delay between Archive.org requests)
+- `CDX_CACHE_MAX_ITEMS` (default `5000`, max in-memory timestamp cache entries)
 - `DB_PRUNE_INTERVAL_SECONDS` (default `600`)
 - `DB_CACHE_RETENTION_SECONDS` (default `1209600` / 14 days)
 - `DB_JOBS_RETENTION_SECONDS` (default `2592000` / 30 days)
+
+WARNING: Setting `ALLOW_UNSAFE_OUTPUT_ROOT=1` disables output root safety boundary checks and may allow writes outside your configured project output area. Keep it `0` unless you fully trust all inputs and runtime context.
 
 ## Release Checklist
 
@@ -95,3 +136,7 @@ Linux / macOS:
 - Verify setup scripts: `install.ps1`, `install.sh`, `run.bat`, `run.sh`
 - Start app and confirm health: `python run_and_healthcheck.py --check-only`
 - Ensure `archive_cache.sqlite3` is backed up before major upgrades
+
+## License
+
+MIT. See `LICENSE`.

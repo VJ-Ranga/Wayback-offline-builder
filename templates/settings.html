@@ -53,6 +53,7 @@
     .btn-light { background: #fff; color: var(--theme-text); border-color: var(--theme-border); }
     .btn-danger { background: #fff1f1; color: #a03030; border-color: #f1cccc; }
 
+
     .layout {
       display: grid;
       grid-template-columns: 2fr 1fr;
@@ -141,6 +142,27 @@
       color: var(--theme-muted);
       background: #fff;
     }
+
+    .update-box {
+      border: 1px solid var(--theme-border);
+      border-radius: 10px;
+      background: #fff;
+      padding: 10px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--theme-muted);
+    }
+
+    .footer-note {
+      margin-top: 16px;
+      border-top: 1px dashed var(--theme-border);
+      padding-top: 12px;
+      font-size: 12px;
+      color: var(--theme-muted);
+      line-height: 1.5;
+    }
+
+
 
     .ok {
       margin: 0 0 10px;
@@ -275,6 +297,50 @@
         </section>
 
         <section class="card" style="margin-top: 14px;">
+          <div class="card-head">Database</div>
+          <div class="card-body grid2">
+            <p class="hint" style="grid-column: 1 / -1;">Choose your DB backend and connection values. Changes are saved to <span class="mono">.env</span>. Restart app after saving to apply backend/path changes.</p>
+            <div class="field">
+              <label>DB Backend</label>
+              <select class="input" name="db_backend" id="db-backend-select">
+                <option value="sqlite" {% if db_config.db_backend == 'sqlite' %}selected{% endif %}>SQLite (default)</option>
+                <option value="mysql" {% if db_config.db_backend == 'mysql' %}selected{% endif %}>MySQL</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Current Active Backend</label>
+              <input class="input mono" type="text" value="{{ active_db_backend }}" readonly>
+            </div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <label>SQLite DB Path</label>
+              <input class="input" type="text" name="sqlite_db_path" value="{{ db_config.sqlite_db_path }}">
+            </div>
+
+            <div class="field mysql-field">
+              <label>MySQL Host</label>
+              <input class="input" type="text" name="mysql_host" value="{{ db_config.mysql_host }}">
+            </div>
+            <div class="field mysql-field">
+              <label>MySQL Port</label>
+              <input class="input" type="text" name="mysql_port" value="{{ db_config.mysql_port }}">
+            </div>
+            <div class="field mysql-field">
+              <label>MySQL Database</label>
+              <input class="input" type="text" name="mysql_database" value="{{ db_config.mysql_database }}">
+            </div>
+            <div class="field mysql-field">
+              <label>MySQL User</label>
+              <input class="input" type="text" name="mysql_user" value="{{ db_config.mysql_user }}">
+            </div>
+            <div class="field mysql-field" style="grid-column: 1 / -1;">
+              <label>MySQL Password</label>
+              <input class="input" type="password" name="mysql_password" placeholder="Leave blank to keep current saved password">
+              <p class="hint" style="margin-top:6px;">Saved password present: {% if db_config.mysql_password_set == '1' %}Yes{% else %}No{% endif %}</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="card" style="margin-top: 14px;">
           <div class="card-head">Safety</div>
           <div class="card-body">
             <p class="hint">Project deletes can optionally remove local output files. Paths outside configured safe output root are skipped automatically.</p>
@@ -283,6 +349,11 @@
               <span class="pill">Localhost mutation guard</span>
               <span class="pill">Safe output-root checks</span>
             </div>
+
+            <div style="margin-top:12px;">
+              <button class="btn btn-light" type="button" id="check-updates-btn">Check for Updates</button>
+              <div id="update-status" class="update-box">Use this to check if your local copy is behind GitHub.</div>
+            </div>
           </div>
         </section>
 
@@ -290,6 +361,11 @@
           <button class="btn btn-primary" type="submit">Save Settings</button>
           <button class="btn btn-danger" type="submit" formaction="/settings/reset">Restore all defaults</button>
           <a class="btn btn-light" href="/">Back to Tool</a>
+        </div>
+
+        <div class="footer-note">
+          <div>Designed by <a href="https://vjranga.com" target="_blank" rel="noopener">vjranga.com</a></div>
+          <div>Copyright &copy; 2026 VJ Wayback Offline Builder. All rights reserved.</div>
         </div>
       </div>
 
@@ -410,6 +486,54 @@
           updateLivePreview(key, fallback);
         });
       });
+    }
+
+    const checkUpdatesBtn = document.getElementById('check-updates-btn');
+    const updateStatus = document.getElementById('update-status');
+
+    function setUpdateStatus(message, isError) {
+      if (!updateStatus) return;
+      updateStatus.textContent = message;
+      updateStatus.style.color = isError ? '#8b2a2a' : 'var(--theme-muted)';
+      updateStatus.style.borderColor = isError ? '#f1c9c9' : 'var(--theme-border)';
+      updateStatus.style.background = isError ? '#fdecec' : '#fff';
+    }
+
+    if (checkUpdatesBtn) {
+      checkUpdatesBtn.addEventListener('click', async function() {
+        checkUpdatesBtn.disabled = true;
+        setUpdateStatus('Checking updates from GitHub...', false);
+        try {
+          const res = await fetch('/settings/check-update');
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error((data && data.error) || 'Update check failed');
+
+          const branch = data.branch || 'main';
+          const commit = data.current_commit || '-';
+          const behind = Number(data.behind || 0);
+          const ahead = Number(data.ahead || 0);
+          const summary = `${data.message} Branch: ${branch}. Commit: ${commit}. Ahead: ${ahead}, Behind: ${behind}.`;
+          setUpdateStatus(summary, false);
+        } catch (err) {
+          setUpdateStatus('Could not check updates. ' + err.message, true);
+        } finally {
+          checkUpdatesBtn.disabled = false;
+        }
+      });
+    }
+
+    const dbBackendSelect = document.getElementById('db-backend-select');
+    const mysqlFields = Array.from(document.querySelectorAll('.mysql-field'));
+    function syncDbFields() {
+      const backend = (dbBackendSelect && dbBackendSelect.value) || 'sqlite';
+      const showMysql = backend === 'mysql';
+      mysqlFields.forEach(function(el) {
+        el.style.display = showMysql ? '' : 'none';
+      });
+    }
+    if (dbBackendSelect) {
+      dbBackendSelect.addEventListener('change', syncDbFields);
+      syncDbFields();
     }
   </script>
 </body>

@@ -58,7 +58,26 @@ if [ "$db_choice" = "mysql" ]; then
     echo "MYSQL_PASSWORD=$mysql_pass"
   } >> .env
 
-  echo "Configured mysql settings in .env. Current app runtime still uses sqlite fallback until mysql store is implemented."
+  .venv/bin/python - "$mysql_host" "$mysql_port" "$mysql_user" "$mysql_pass" "$mysql_db" <<'PY'
+import sys
+import pymysql
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+user = sys.argv[3]
+password = sys.argv[4]
+database = sys.argv[5].replace("`", "")
+
+conn = pymysql.connect(host=host, port=port, user=user, password=password, charset="utf8mb4", autocommit=True)
+cur = conn.cursor()
+cur.execute(f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+cur.close()
+conn.close()
+PY
+  echo "MySQL database ensured: $mysql_db"
+else
+  mkdir -p "$(dirname "$sqlite_path")"
+  touch "$sqlite_path"
 fi
 
 echo "Install complete. Run ./run.sh to start the app."

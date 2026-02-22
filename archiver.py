@@ -4,8 +4,9 @@ import hashlib
 import json
 import os
 import re
+import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -66,8 +67,42 @@ class ArchiveWebTool:
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
         self.timeout = timeout
-        self._cdx_cache: Dict[str, List[str]] = {}
+        self._cdx_cache: "OrderedDict[str, List[str]]" = OrderedDict()
+        self._cdx_cache_max_items = max(100, int(os.environ.get("CDX_CACHE_MAX_ITEMS", "5000")))
+        self._wayback_min_interval_seconds = max(0.0, float(os.environ.get("WAYBACK_MIN_REQUEST_INTERVAL_MS", "250")) / 1000.0)
+        self._wayback_rate_lock = threading.Lock()
+        self._wayback_next_allowed_ts = 0.0
         self._archive_unavailable_until = 0.0
+
+    def _throttle_wayback(self, url: str) -> None:
+        if self._wayback_min_interval_seconds <= 0:
+            return
+        host = (urlparse(url).netloc or "").lower()
+        if "archive.org" not in host:
+            return
+
+        delay = 0.0
+        now = time.time()
+        with self._wayback_rate_lock:
+            slot = max(now, self._wayback_next_allowed_ts)
+            self._wayback_next_allowed_ts = slot + self._wayback_min_interval_seconds
+            if slot > now:
+                delay = slot - now
+        if delay > 0:
+            time.sleep(delay)
+
+    def _cdx_cache_get(self, key: str) -> Optional[List[str]]:
+        cached = self._cdx_cache.pop(key, None)
+        if cached is None:
+            return None
+        self._cdx_cache[key] = cached
+        return cached
+
+    def _cdx_cache_set(self, key: str, value: List[str]) -> None:
+        self._cdx_cache.pop(key, None)
+        self._cdx_cache[key] = value
+        while len(self._cdx_cache) > self._cdx_cache_max_items:
+            self._cdx_cache.popitem(last=False)
 
     def _mark_archive_unavailable(self, hold_seconds: int = 120) -> None:
         self._archive_unavailable_until = max(self._archive_unavailable_until, time.time() + max(30, hold_seconds))
@@ -95,6 +130,7 @@ class ArchiveWebTool:
         last_exc: Optional[requests.RequestException] = None
         for attempt in range(max(0, retries) + 1):
             try:
+                self._throttle_wayback(url)
                 response = self.session.get(url, params=params, timeout=timeout)
                 if int(response.status_code) == 503:
                     self._mark_archive_unavailable()
@@ -1229,7 +1265,7 @@ class ArchiveWebTool:
         return None
 
     def _timestamps_for_url(self, url: str) -> List[str]:
-        cached = self._cdx_cache.get(url)
+        cached = self._cdx_cache_get(url)
         if cached is not None:
             return cached
 
@@ -1248,18 +1284,18 @@ class ArchiveWebTool:
             )
             rows = response.json()
         except requests.RequestException:
-            self._cdx_cache[url] = []
+            self._cdx_cache_set(url, [])
             return []
 
         if len(rows) <= 1:
-            self._cdx_cache[url] = []
+            self._cdx_cache_set(url, [])
             return []
 
         timestamps = sorted(
             {row[0] for row in rows[1:] if row and row[0].isdigit() and len(row[0]) == 14},
             reverse=True,
         )
-        self._cdx_cache[url] = timestamps
+        self._cdx_cache_set(url, timestamps)
         return timestamps
 
     def _download_at_timestamp(self, url: str, timestamp: str) -> Optional[Tuple[bytes, str, str]]:

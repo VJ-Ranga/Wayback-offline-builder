@@ -5,8 +5,11 @@ venv/
 env/
 
 archive_cache.sqlite3
+*.sqlite3
 output/
 runtime/
+data/
+.env
 
 .DS_Store
 Thumbs.db
