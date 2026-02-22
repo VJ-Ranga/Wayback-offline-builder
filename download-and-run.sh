@@ -6,6 +6,12 @@ REPO_NAME="Wayback-offline-builder"
 REF="main"
 TARGET_DIR="wayback-offline-builder"
 
+echo
+echo "==============================================="
+echo "  VJRanga - Wayback Offline Builder"
+echo "==============================================="
+echo
+
 for arg in "$@"; do
   case "$arg" in
     --ref=*) REF="${arg#*=}" ;;
@@ -32,7 +38,7 @@ fi
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-echo "Downloading ${REPO_NAME} (${REF})..."
+echo "[1/3] Downloading ${REPO_NAME} (${REF})..."
 "${FETCH_CMD[@]}" > "$tmp_dir/source.tar.gz"
 
 tar -xzf "$tmp_dir/source.tar.gz" -C "$tmp_dir"
@@ -46,11 +52,11 @@ fi
 
 mv "$src_dir" "$TARGET_DIR"
 
-echo "Project extracted to: $TARGET_DIR"
+echo "[2/3] Project extracted to: $TARGET_DIR"
 cd "$TARGET_DIR"
 
 chmod +x install.sh run.sh uninstall.sh update.sh
 ./install.sh
 
-echo "Starting app..."
+echo "[3/3] Starting app..."
 ./run.sh

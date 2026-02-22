@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo
+echo "==============================================="
+echo "  VJRanga - Wayback Offline Builder Installer"
+echo "==============================================="
+echo
+echo "[1/4] Preparing Python environment..."
+
 if [ ! -d ".venv" ]; then
   python3 -m venv .venv
 fi
 
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install --disable-pip-version-check -q --upgrade pip
+.venv/bin/python -m pip install --disable-pip-version-check -q -r requirements.txt
 
 ask_value() {
   local prompt="$1"
@@ -43,7 +50,10 @@ mkdir -p "$output_root"
   echo "PORT=5000"
 } > .env
 
+echo "[2/4] Writing local configuration (.env)..."
+
 if [ "$db_choice" = "mysql" ]; then
+  echo "[3/4] Ensuring MySQL database exists..."
   mysql_host="$(ask_value "MySQL host" "127.0.0.1")"
   mysql_port="$(ask_value "MySQL port" "3306")"
   mysql_db="$(ask_value "MySQL database name" "wayback_builder")"
@@ -76,8 +86,10 @@ conn.close()
 PY
   echo "MySQL database ensured: $mysql_db"
 else
+  echo "[3/4] Initializing SQLite path..."
   mkdir -p "$(dirname "$sqlite_path")"
   touch "$sqlite_path"
 fi
 
-echo "Install complete. Run ./run.sh to start the app."
+echo "[4/4] Install complete."
+echo "Run ./run.sh to start the app."

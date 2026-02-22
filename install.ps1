@@ -1,11 +1,22 @@
 $ErrorActionPreference = "Stop"
 
+function Show-Banner {
+  Write-Host ""
+  Write-Host "===============================================" -ForegroundColor DarkYellow
+  Write-Host "  VJRanga - Wayback Offline Builder Installer" -ForegroundColor Yellow
+  Write-Host "===============================================" -ForegroundColor DarkYellow
+  Write-Host ""
+}
+
+Show-Banner
+Write-Host "[1/4] Preparing Python environment..."
+
 if (-not (Test-Path ".venv")) {
   python -m venv .venv
 }
 
-& .\.venv\Scripts\python.exe -m pip install --upgrade pip
-& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+& .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check --no-python-version-warning -q --upgrade pip
+& .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check --no-python-version-warning -q -r requirements.txt
 
 function Ask-Value([string]$Prompt, [string]$Default) {
   $value = Read-Host "$Prompt [$Default]"
@@ -58,7 +69,10 @@ if ($dbChoice -eq "mysql") {
 
 Set-Content -Path ".env" -Value ($envLines -join "`n") -Encoding UTF8
 
+Write-Host "[2/4] Writing local configuration (.env)..." -ForegroundColor Cyan
+
 if ($dbChoice -eq "sqlite") {
+  Write-Host "[3/4] Initializing SQLite path..." -ForegroundColor Cyan
   $sqliteDir = Split-Path -Parent $sqlitePath
   if ($sqliteDir -and -not (Test-Path $sqliteDir)) {
     New-Item -ItemType Directory -Path $sqliteDir -Force | Out-Null
@@ -69,8 +83,10 @@ if ($dbChoice -eq "sqlite") {
 }
 
 if ($dbChoice -eq "mysql") {
+  Write-Host "[3/4] Ensuring MySQL database exists..." -ForegroundColor Cyan
   & .\.venv\Scripts\python.exe -c "import sys,pymysql; host=sys.argv[1]; port=int(sys.argv[2]); user=sys.argv[3]; password=sys.argv[4]; db=sys.argv[5]; conn=pymysql.connect(host=host, port=port, user=user, password=password, charset='utf8mb4', autocommit=True); cur=conn.cursor(); cur.execute('CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci' % db.replace('`','')); cur.close(); conn.close()" $mysqlHost $mysqlPort $mysqlUser $mysqlPass $mysqlDb
   Write-Host "MySQL database ensured: $mysqlDb" -ForegroundColor Green
 }
 
-Write-Host "Install complete. Run .\run.bat to start the app."
+Write-Host "[4/4] Install complete." -ForegroundColor Green
+Write-Host "Run .\run.bat to start the app."
