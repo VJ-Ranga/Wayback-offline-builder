@@ -2,6 +2,17 @@
 
 A local-first Flask app to inspect Wayback snapshots, analyze site structure, generate sitemap/check reports, and build a recoverable offline copy.
 
+## What This Tool Does
+
+Wayback Offline Builder helps you recover a usable offline version of a website from Internet Archive snapshots.
+
+- Finds available snapshots for a target domain.
+- Analyzes one snapshot (or many) to estimate structure, files, and likely platform signals.
+- Downloads archived files into a local output folder.
+- Checks downloaded files against expected archive inventory (downloaded vs missing).
+- Tries to recover missing files from nearby timestamps.
+- Saves project history, cache, and settings for resume/reopen workflows.
+
 ## Project Status
 
 This project is actively under development and evolving quickly.
@@ -31,7 +42,38 @@ If you use it in production-like environments, please review settings carefully 
 
 ## Quick Start
 
-### One-command Linux Install (no git)
+## Requirements
+
+Windows:
+- PowerShell 5.1+ (or PowerShell 7+)
+- Python 3.10+
+- Internet connection
+
+Linux:
+- `bash`
+- `python3` with `venv`
+- `curl` or `wget`
+- `tar`
+
+macOS:
+- `bash`
+- `python3` with `venv`
+- `curl` (or `wget`)
+- `tar`
+
+Optional (only if using MySQL backend):
+- MySQL server reachable from your machine
+- valid MySQL user with create database/table permissions
+
+### One-command Install (no git)
+
+Windows (PowerShell):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/VJ-Ranga/Wayback-offline-builder/main/download-and-run.ps1 -UseBasicParsing | iex"
+```
+
+Linux / macOS:
 
 ```bash
 bash <(wget -qO- https://raw.githubusercontent.com/VJ-Ranga/Wayback-offline-builder/main/download-and-run.sh)
@@ -43,7 +85,13 @@ or
 bash <(curl -fsSL https://raw.githubusercontent.com/VJ-Ranga/Wayback-offline-builder/main/download-and-run.sh)
 ```
 
-This downloads the full project archive, runs `install.sh`, and starts the app.
+These download the full project archive, run the installer for your OS, and start the app.
+
+How downloader scripts work:
+- Download repo archive from GitHub (`main` by default)
+- Extract into a local folder
+- Run installer (`install.ps1` or `install.sh`)
+- Start app (`run.bat` or `run.sh`)
 
 ### Windows (PowerShell)
 
